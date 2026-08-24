@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-USAGE='hget - fetch a URL over HTTP/HTTPS using nothing but bash. No curl, no wget.
+USAGE='usage: hget <url> [file]
+       hget [file] <url>
 
-usage: hget <url> [file]        write to file, or to stdout if omitted
-       hget [file] <url>        either order; the http:// one is the url
-
-Scheme defaults to http. Redirects are followed. Non-2xx exits 1.
-HTTPS needs openssl(1). Runs on bash 3.2 and up.'
+Without a file, writes to stdout. Scheme defaults to http.'
 
 set -u
 hop=0
@@ -40,9 +37,8 @@ while :; do
     else
         ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"
         err=${err:-$(mktemp "${TMPDIR:-/tmp}/hget.XXXXXX")} || die "cannot create temp file"
-        # -quiet implies -ign_eof, so openssl waits for the server to close.
-        # Its stderr is chatter on success and the only clue on failure, so it
-        # is held aside and shown from there.
+        # -quiet implies -ign_eof, so openssl waits for the server to close. Its
+        # stderr is noise on success and the only clue on failure, so hold it aside.
         exec 5< <(req | "$ssl" s_client -quiet -verify_return_error \
                       -servername "$host" -connect "$host:$port" 2>"$err")
     fi

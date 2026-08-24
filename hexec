@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-USAGE='hexec - fetch a remote script, verify its SHA-256, then run it.
+USAGE='usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
+  -n   fetch and verify only, then print the path
 
-usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
-  -n   fetch and verify only; print the path and stop, so you can read it first
-
-  hexec https://ex.io/install.sh https://ex.io/install.sh.sha256
-  hexec https://ex.io/install.sh 9f86d081... -- --prefix=/opt
-
-curl|bash cannot be verified: it runs line 1 while line 500 is still in flight.
-hexec buffers to a file first, so a tampered or truncated script never runs at
-all. Second argument is a bare hash if 64 hex chars, else a URL to a checksum
-file (sha256sum format, matched by name). Exits with the status of the script.'
+The second argument is a bare hash if 64 hex chars, else a url to a checksum
+file. Arguments after -- go to the script. Exits with the status of the script.'
 
 set -u
 dry=0 sum=
