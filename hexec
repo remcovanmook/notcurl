@@ -27,7 +27,7 @@ case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256"
 tmp=$(mktemp "${TMPDIR:-/tmp}/hexec.XXXXXX") || die "cannot create temp file"
 trap 'rm -f "$tmp" "$tmp.sum"' EXIT INT TERM
 
-"$hget" "$url" "$tmp" || die "download failed: $url"
+"$hget" "$url" >"$tmp" || die "download failed: $url"
 [ -s "$tmp" ] || die "downloaded an empty file: $url"
 
 if [ -z "$sum" ]; then
@@ -35,7 +35,7 @@ if [ -z "$sum" ]; then
 else
     want=$(printf '%s' "$sum" | tr A-F a-f)
     if [ ${#sum} -ne 64 ] || [ -n "${sum//[0-9A-Fa-f]/}" ]; then
-        "$hget" "$sum" "$tmp.sum" || die "download failed: $sum"
+        "$hget" "$sum" >"$tmp.sum" || die "download failed: $sum"
         # First 64-hex token wins, unless a later line names our file exactly.
         want=$(awk -v n="${url##*/}" 'tolower($1)~/^[0-9a-f]{64}$/{if(!h)h=$1
                  sub(/^[*]/,"",$2); sub(/.*\//,"",$2); if($2==n){h=$1;exit}}

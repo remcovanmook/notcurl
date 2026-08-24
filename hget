@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-USAGE='usage: hget <url> [file]
-       hget [file] <url>
+USAGE='usage: hget <url>
 
-Without a file, writes to stdout. Scheme defaults to http.'
+Scheme defaults to http.'
 
 set -u
 hop=0
@@ -12,9 +11,8 @@ usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
 # HTTP/1.0 on purpose: it forbids chunked encoding, so the body needs no framing.
 req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
 
-[ $# -ge 1 ] && [ $# -le 2 ] || usage
-url=$1 out=${2:-/dev/stdout}
-case $out in http://*|https://*) url=$out out=$1 ;; esac
+[ $# -eq 1 ] || usage
+url=$1
 
 err=
 trap '[ -n "$err" ] && rm -f "$err"' EXIT INT TERM
@@ -65,4 +63,4 @@ done
 
 [[ $code == 2* ]] || die "$url returned $code $reason"
 # read(1) consumed exactly the headers; the rest of fd 5 is the body, byte for byte.
-cat <&5 >"$out" || die "cannot write $out"
+cat <&5

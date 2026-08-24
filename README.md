@@ -52,21 +52,21 @@ sudo make install            # /usr/local/bin, override with PREFIX=
 ## hget
 
 ```
-hget <url> [file]        write to file, or to stdout if omitted
-hget [file] <url>        either order; whichever starts http:// is the url
+hget <url>
 ```
 
 ```bash
 hget https://example.com
-hget https://raw.githubusercontent.com/torvalds/linux/master/README linux.README
-hget 127.0.0.1:8080/health
+hget https://raw.githubusercontent.com/torvalds/linux/master/README > linux.README
+hget 127.0.0.1:8080/health | jq .
 ```
 
-There are no flags. The scheme may be omitted and defaults to `http`, and
-redirects are always followed, up to five. Any non-2xx status is an error: it
-goes to stderr and exits 1, so a 404 page is never mistaken for content. When
-TLS fails, the openssl error lines are printed and nothing else — its chatter
-on a successful handshake is held aside and dropped.
+The body goes to stdout and everything else to stderr, so redirection and pipes
+do what you expect. There are no flags. The scheme may be omitted and defaults
+to `http`, and redirects are always followed, up to five. Any non-2xx status is
+an error: it goes to stderr and exits 1, so a 404 page is never mistaken for
+content. When TLS fails, the openssl error lines are printed and nothing else —
+its chatter on a successful handshake is held aside and dropped.
 
 ## hexec
 

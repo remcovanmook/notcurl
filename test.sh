@@ -77,19 +77,18 @@ echo "hget"
 
 out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"          "installer ran" "$out"
 out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "defaults to http://"   "installer ran" "$out"
-$HGET "$B/install.sh" "$DOC/a.sh" 2>/dev/null
-is "<url> <file> writes the file"  "$GOOD" "$(sha "$DOC/a.sh")"
-$HGET "$DOC/b.sh" "$B/install.sh" 2>/dev/null
-is "<file> <url> works too"        "$GOOD" "$(sha "$DOC/b.sh")"
-$HGET "$B/binary.bin" "$DOC/out.bin" 2>/dev/null
+$HGET "$B/install.sh" >"$DOC/a.sh" 2>/dev/null
+is "body goes to stdout"  "$GOOD" "$(sha "$DOC/a.sh")"
+$HGET "$B/binary.bin" >"$DOC/out.bin" 2>/dev/null
 is "body is binary-clean" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/out.bin")"
+out=$($HGET "$B/nope" 2>/dev/null); is "errors keep off stdout" "" "$out"
 out=$($HGET "$B/sub" 2>&1);                   has "redirects are followed" "sub index" "$out"
 $HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"          "1" "$?"
 $HGET >/dev/null 2>&1;                        is "no args exits 2"      "2" "$?"
-$HGET a b c >/dev/null 2>&1;                  is "three args exits 2"   "2" "$?"
+$HGET a b >/dev/null 2>&1;                    is "two args exits 2"     "2" "$?"
 $HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"   "1" "$?"
-$HGET "$B/install.sh" /nonexistent/dir/x >/dev/null 2>&1
-is "unwritable target exits 1" "1" "$?"
+$HGET "$B/install.sh" 2>/dev/null | head -1 >/dev/null
+is "SIGPIPE stays quiet" "" "$($HGET "$B/install.sh" 2>&1 >/dev/null | head -1 | grep -i 'cannot write')"
 out=$(env PATH=/nonexistent $SH ./hget https://example.com 2>&1); rc=$?
 has "https without openssl says so" "needs openssl" "$out"
 is  "https without openssl exits 1" "1" "$rc"
