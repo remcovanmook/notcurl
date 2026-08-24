@@ -4,11 +4,10 @@ USAGE='usage: hget <url>
 Scheme defaults to http.'
 
 set -u
-hop=0
 say()   { printf 'hget: %s\n' "$*" >&2; }
 die()   { say "$@"; exit 1; }
 usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
-# HTTP/1.0 on purpose: it forbids chunked encoding, so the body needs no framing.
+# HTTP/1.0 forbids chunked encoding.
 req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
 
 [ $# -eq 1 ] || usage
@@ -35,8 +34,8 @@ while :; do
     else
         ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"
         err=${err:-$(mktemp "${TMPDIR:-/tmp}/hget.XXXXXX")} || die "cannot create temp file"
-        # -quiet implies -ign_eof, so openssl waits for the server to close. Its
-        # stderr is noise on success and the only clue on failure, so hold it aside.
+        # -quiet implies -ign_eof, so openssl waits for the server to close.
+        # Its stderr is noise on success, the only clue on failure.
         exec 5< <(req | "$ssl" s_client -quiet -verify_return_error \
                       -servername "$host" -connect "$host:$port" 2>"$err")
     fi
@@ -52,7 +51,7 @@ while :; do
     shopt -u nocasematch
 
     [ -n "$loc" ] && [[ $code == 30[12378] ]] || break
-    [ $((hop += 1)) -le 5 ] || die "more than 5 redirects"
+    [ $((hop = ${hop:-0} + 1)) -le 5 ] || die "more than 5 redirects"
     case $loc in
         *://*) url=$loc ;;
         /*)    url=$scheme://$hostport$loc ;;
@@ -62,5 +61,5 @@ while :; do
 done
 
 [[ $code == 2* ]] || die "$url returned $code $reason"
-# read(1) consumed exactly the headers; the rest of fd 5 is the body, byte for byte.
+# read(1) consumed exactly the headers, so fd 5 is at the body.
 cat <&5

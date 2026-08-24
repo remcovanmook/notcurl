@@ -83,6 +83,17 @@ $HGET "$B/binary.bin" >"$DOC/out.bin" 2>/dev/null
 is "body is binary-clean" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/out.bin")"
 out=$($HGET "$B/nope" 2>/dev/null); is "errors keep off stdout" "" "$out"
 out=$($HGET "$B/sub" 2>&1);                   has "redirects are followed" "sub index" "$out"
+# a server that redirects to itself, so the hop counter is the only thing stopping it
+LP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+python3 -c "
+import http.server
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(s): s.send_response(302); s.send_header('Location','/loop'); s.end_headers()
+    def log_message(*a): pass
+http.server.HTTPServer(('127.0.0.1',$LP),H).serve_forever()" & LOOPSRV=$!
+sleep 0.5
+$HGET "http://127.0.0.1:$LP/loop" >/dev/null 2>&1; is "redirect loop is bounded" "1" "$?"
+kill $LOOPSRV 2>/dev/null
 $HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"          "1" "$?"
 $HGET >/dev/null 2>&1;                        is "no args exits 2"      "2" "$?"
 $HGET a b >/dev/null 2>&1;                    is "two args exits 2"     "2" "$?"

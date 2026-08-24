@@ -19,7 +19,7 @@ url=${1:-}; [ -n "$url" ] || usage; shift
 [ $# -gt 0 ] && [ "$1" != -- ] && { sum=$1; shift; }
 [ "${1:-}" = -- ] && shift
 
-hget=${0%/*}/hget                      # ours wins over $PATH, so the pair matches
+hget=${0%/*}/hget                      # ours before $PATH, so the pair matches
 [ -x "$hget" ] || hget=$(command -v hget) || die "cannot find hget(1)"
 SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || die "no sha256 tool"
 case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
@@ -54,7 +54,7 @@ if [ $dry -eq 1 ]; then
     say "not executing (-n); script saved at:"; printf '%s\n' "$tmp"; exit 0
 fi
 
-# Honour the shebang by calling the interpreter, which also works on noexec /tmp.
+# Run the interpreter the shebang names.
 read -r sb < "$tmp"; interp=bash
 case $sb in '#!'*) interp=${sb#\#!} ;; esac
 say "executing $url"
