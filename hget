@@ -1,137 +1,72 @@
 #!/usr/bin/env bash
-#
-# hget - fetch a URL over HTTP or HTTPS using nothing but bash itself.
-#
-#   HTTP  : bash's built-in /dev/tcp socket redirection
-#   HTTPS : the same, with openssl(1) doing the handshake
-#
-# No curl. No wget. Runs on bash 3.2 (stock macOS) and anything newer.
-#
-# usage: hget [-L] [-v] [-o file] <url>
-#          -L  follow up to 5 redirects
-#          -v  echo response headers to stderr
-#          -o  write body to file instead of stdout ('-' means stdout)
-#
-# Exits non-zero on any non-2xx status, so `hget URL | bash` cannot pipe an
-# error page into your shell.
+USAGE='hget - fetch a URL over HTTP/HTTPS using nothing but bash. No curl, no wget.
+
+usage: hget [-L] [-v] [-o file] <url>
+  -L        follow up to 5 redirects
+  -v        response headers and TLS errors to stderr
+  -o file   write body to file instead of stdout ("-" is stdout)
+
+Scheme defaults to http. Non-2xx exits 1. HTTPS needs openssl(1). bash 3.2+.'
 
 set -u
+follow=0 verbose=0 out=- hop=0
+say()   { printf 'hget: %s\n' "$*" >&2; }
+die()   { say "$@"; exit 1; }
+usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
+# HTTP/1.0 on purpose: it forbids chunked encoding, so the body needs no framing.
+req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
 
-PROG=${0##*/}
-MAX_REDIRECTS=5
-
-die()   { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
-usage() { printf 'usage: %s [-L] [-v] [-o file] <url>\n' "$PROG" >&2; exit 2; }
-
-follow=0
-verbose=0
-outfile=-
-while getopts ':Lvo:' opt; do
-    case $opt in
-        L) follow=1 ;;
-        v) verbose=1 ;;
-        o) outfile=$OPTARG ;;
-        *) usage ;;
-    esac
+while getopts ':Lvo:' o; do
+    case $o in L) follow=1 ;; v) verbose=1 ;; o) out=$OPTARG ;; *) usage ;; esac
 done
 shift $((OPTIND - 1))
 [ $# -eq 1 ] || usage
-
 url=$1
-hop=0
-
-# HTTP/1.0 on purpose: it forbids chunked transfer-encoding, so the body on
-# the wire is the body, and we never have to decode chunk framing in bash.
-send_request() {
-    printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\nAccept: */*\r\n\r\n' \
-        "$path" "$hostport" "$PROG"
-}
 
 while :; do
-    # ---- parse the url ------------------------------------------------
-    case $url in
-        *://*) scheme=${url%%://*} rest=${url#*://} ;;
-        *)     scheme=http         rest=$url ;;
-    esac
-    hostport=${rest%%/*}
-    case $rest in
-        */*) path=/${rest#*/} ;;
-        *)   path=/ ;;
-    esac
-    host=${hostport%%:*}
-    port=${hostport##*:}
-    [ "$port" = "$hostport" ] && port=""
-
-    case $scheme in
-        http)  : "${port:=80}"  ;;
-        https) : "${port:=443}" ;;
-        *)     die "unsupported scheme: $scheme" ;;
-    esac
+    rest=${url#*://} scheme=http
+    [ "$rest" != "$url" ] && scheme=${url%%://*}
+    hostport=${rest%%/*} path=/
+    [ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
+    host=${hostport%%:*} port=${hostport##*:}
+    [ "$port" = "$hostport" ] && port=
+    [ "$scheme" = http ]  && : "${port:=80}"
+    [ "$scheme" = https ] && : "${port:=443}"
+    [ -n "$port" ] || die "unsupported scheme: $scheme"
     [ -n "$host" ] || die "no host in url: $url"
 
-    # ---- connect, fd 5 becomes the response stream --------------------
-    case $scheme in
-        http)
-            exec 5<>"/dev/tcp/$host/$port" || die "cannot connect to $host:$port"
-            send_request >&5
-            ;;
-        https)
-            command -v openssl >/dev/null 2>&1 || die "https needs openssl(1)"
-            # -quiet implies -ign_eof, so openssl holds the connection open
-            # after our request hits EOF and waits for the server to close.
-            # Handshake errors (bad/expired cert) only surface under -v.
-            [ $verbose -eq 1 ] && tlslog=/dev/stderr || tlslog=/dev/null
-            exec 5< <(send_request | openssl s_client -quiet -verify_return_error \
-                          -servername "$host" -connect "$host:$port" 2>"$tlslog")
-            ;;
-    esac
+    if [ "$scheme" = http ]; then
+        exec 5<>"/dev/tcp/$host/$port" || die "cannot connect to $host:$port"
+        req >&5
+    else
+        # -quiet implies -ign_eof, so openssl waits for the server to close.
+        [ $verbose -eq 1 ] && tls=/dev/stderr || tls=/dev/null
+        exec 5< <(req | openssl s_client -quiet -verify_return_error \
+                      -servername "$host" -connect "$host:$port" 2>"$tls")
+    fi
 
-    # ---- status line --------------------------------------------------
-    read -r proto code reason <&5 || die "no response from $host:$port (retry with -v for details)"
-    reason=${reason%$'\r'}
-    [ -n "$code" ] || die "malformed response from $host:$port"
-    [ $verbose -eq 1 ] && printf '%s %s %s\n' "$proto" "$code" "$reason" >&2
-
-    # ---- headers ------------------------------------------------------
-    location=""
+    read -r proto code reason <&5 || die "no response from $host:$port (try -v)"
+    reason=${reason%$'\r'} loc=
+    [ $verbose -eq 1 ] && say "$proto $code $reason"
     shopt -s nocasematch
-    while IFS= read -r line <&5; do
-        line=${line%$'\r'}
-        [ -n "$line" ] || break
-        [ $verbose -eq 1 ] && printf '%s\n' "$line" >&2
-        [[ $line == location:* ]] && read -r location <<<"${line#*:}"
+    while IFS= read -r h <&5 && h=${h%$'\r'} && [ -n "$h" ]; do
+        [ $verbose -eq 1 ] && printf '%s\n' "$h" >&2
+        [[ $h == location:* ]] && read -r loc <<<"${h#*:}"
     done
     shopt -u nocasematch
 
-    # ---- redirect? ----------------------------------------------------
-    if [ $follow -eq 1 ] && [ -n "$location" ]; then
-        case $code in
-            301|302|303|307|308)
-                hop=$((hop + 1))
-                [ $hop -le $MAX_REDIRECTS ] || die "more than $MAX_REDIRECTS redirects"
-                case $location in
-                    *://*) url=$location ;;
-                    /*)    url=$scheme://$hostport$location ;;
-                    *)     url=$scheme://$hostport${path%/*}/$location ;;
-                esac
-                [ $verbose -eq 1 ] && printf '%s: -> %s\n' "$PROG" "$url" >&2
-                exec 5<&-
-                continue
-                ;;
-        esac
-    fi
-    break
+    [ $follow -eq 1 ] && [ -n "$loc" ] && [[ $code == 30[12378] ]] || break
+    [ $((hop += 1)) -le 5 ] || die "more than 5 redirects"
+    case $loc in
+        *://*) url=$loc ;;
+        /*)    url=$scheme://$hostport$loc ;;
+        *)     url=$scheme://$hostport${path%/*}/$loc ;;
+    esac
+    [ $verbose -eq 1 ] && say "-> $url"
+    exec 5<&-
 done
 
-case $code in
-    2*) ;;
-    *)  die "$url returned $code $reason" ;;
-esac
-
-# read(1) has consumed exactly the headers; the rest of fd 5 is the body,
-# byte for byte.
-if [ "$outfile" = "-" ]; then
-    cat <&5
-else
-    cat <&5 >"$outfile" || die "cannot write $outfile"
-fi
+[[ $code == 2* ]] || die "$url returned $code $reason"
+[ "$out" = - ] && out=/dev/stdout
+# read(1) consumed exactly the headers; the rest of fd 5 is the body, byte for byte.
+cat <&5 >"$out" || die "cannot write $out"
