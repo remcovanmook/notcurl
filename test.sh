@@ -76,7 +76,8 @@ echo
 echo "hget"
 
 out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"          "installer ran" "$out"
-out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "defaults to http://"   "installer ran" "$out"
+$HGET "127.0.0.1:$PORT/install.sh" >/dev/null 2>&1
+is "bare host:port is rejected" "1" "$?"
 $HGET "$B/install.sh" >"$DOC/a.sh" 2>/dev/null
 is "body goes to stdout"  "$GOOD" "$(sha "$DOC/a.sh")"
 $HGET "$B/binary.bin" >"$DOC/out.bin" 2>/dev/null
@@ -98,6 +99,8 @@ $HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"          "1" "$?"
 $HGET >/dev/null 2>&1;                        is "no args exits 2"      "2" "$?"
 $HGET a b >/dev/null 2>&1;                    is "two args exits 2"     "2" "$?"
 $HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"   "1" "$?"
+$HGET "ftp://example.com:21/" >/dev/null 2>&1; is "bad scheme with a port too" "1" "$?"
+$HGET "http://" >/dev/null 2>&1;              is "no host exits 1"      "1" "$?"
 $HGET "$B/install.sh" 2>/dev/null | head -1 >/dev/null
 is "SIGPIPE stays quiet" "" "$($HGET "$B/install.sh" 2>&1 >/dev/null | head -1 | grep -i 'cannot write')"
 out=$(env PATH=/nonexistent $SH ./hget https://example.com 2>&1); rc=$?

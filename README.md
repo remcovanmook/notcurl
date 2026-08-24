@@ -58,14 +58,14 @@ hget <url>
 ```bash
 hget https://example.com
 hget https://raw.githubusercontent.com/torvalds/linux/master/README > linux.README
-hget 127.0.0.1:8080/health | jq .
+hget http://127.0.0.1:8080/health | jq .
 ```
 
 The body goes to stdout and everything else to stderr, so redirection and pipes
-do what you expect. There are no flags. The scheme may be omitted and defaults
-to `http`, and redirects are always followed, up to five. Any non-2xx status is
-an error: it goes to stderr and exits 1, so a 404 page is never mistaken for
-content. When TLS fails, the openssl error lines are printed and nothing else —
+do what you expect. There are no flags. The scheme is required — there is no
+default, so nothing silently falls back to plaintext — and redirects are always
+followed, up to five. Any non-2xx status is an error: it goes to stderr and
+exits 1, so a 404 page is never mistaken for content. When TLS fails, the openssl error lines are printed and nothing else —
 its chatter on a successful handshake is held aside and dropped.
 
 ## hexec
@@ -142,7 +142,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-37 tests, passing on bash 3.2 and 5.3.
+39 tests, passing on bash 3.2 and 5.3.
 
 ---
 

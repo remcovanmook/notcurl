@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-USAGE='usage: hget <url>
-
-Scheme defaults to http.'
+USAGE='usage: hget <url>'
 
 set -u
 say()   { printf 'hget: %s\n' "$*" >&2; }
@@ -17,15 +15,13 @@ err=
 trap '[ -n "$err" ] && rm -f "$err"' EXIT INT TERM
 
 while :; do
-    rest=${url#*://} scheme=http
-    [ "$rest" != "$url" ] && scheme=${url%%://*}
+    rest=${url#*://} scheme=${url%%://*}
     hostport=${rest%%/*} path=/
     [ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
     host=${hostport%%:*} port=${hostport##*:}
     [ "$port" = "$hostport" ] && port=
-    [ "$scheme" = http ]  && : "${port:=80}"
-    [ "$scheme" = https ] && : "${port:=443}"
-    [ -n "$port" ] || die "unsupported scheme: $scheme"
+    case $scheme in http) port=${port:-80} ;; https) port=${port:-443} ;;
+                    *) die "url must start with http:// or https://" ;; esac
     [ -n "$host" ] || die "no host in url: $url"
 
     if [ "$scheme" = http ]; then
