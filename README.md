@@ -31,6 +31,8 @@ Nothing runs if the hash does not match.
 
 - bash 3.2 or newer, built with `--enable-net-redirections` (the default on
   Debian, Ubuntu and macOS). Stock `/bin/bash` on macOS is 3.2 and works.
+- `cat(1)`, the only external command on the HTTP path. Bash variables cannot
+  hold NUL bytes, so the body has to be moved by something that can.
 - `openssl(1)` — only for HTTPS.
 - `sha256sum`, `shasum` or `openssl` — only for `hexec` verification.
 - `python3` — only to run the test suite.
@@ -50,30 +52,28 @@ sudo make install            # /usr/local/bin, override with PREFIX=
 ## hget
 
 ```
-hget [-L] [-v] [-o file] <url>
-
-  -L        follow up to 5 redirects
-  -v        echo response headers (and TLS errors) to stderr
-  -o file   write the body to file instead of stdout; '-' means stdout
+hget <url> [file]        write to file, or to stdout if omitted
+hget [file] <url>        either order; whichever starts http:// is the url
 ```
 
 ```bash
 hget https://example.com
-hget -o linux.README -L https://raw.githubusercontent.com/torvalds/linux/master/README
-hget -v http://127.0.0.1:8080/health
+hget https://raw.githubusercontent.com/torvalds/linux/master/README linux.README
+hget 127.0.0.1:8080/health
 ```
 
-The scheme may be omitted and defaults to `http`. Any non-2xx status is an
-error: it goes to stderr and exits 1, so a 404 page can never be mistaken for
-content.
+There are no flags. The scheme may be omitted and defaults to `http`, and
+redirects are always followed, up to five. Any non-2xx status is an error: it
+goes to stderr and exits 1, so a 404 page is never mistaken for content. When
+TLS fails, the openssl error lines are printed and nothing else — its chatter
+on a successful handshake is held aside and dropped.
 
 ## hexec
 
 ```
-hexec [-n] [-v] <url> [<sha256-url>|<sha256>] [-- args...]
+hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
 
   -n   fetch and verify only; print the path and stop, so you can read it first
-  -v   verbose, passed through to hget
 ```
 
 ```bash
@@ -142,7 +142,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-33 tests, passing on bash 3.2 and 5.3.
+36 tests, passing on bash 3.2 and 5.3.
 
 ---
 

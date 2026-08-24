@@ -75,17 +75,21 @@ echo "hget/hexec test suite  (shell: $($SH -c 'echo $BASH_VERSION'), port $PORT)
 echo
 echo "hget"
 
-out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"            "installer ran" "$out"
-out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "defaults to http://"     "installer ran" "$out"
-$HGET -o "$DOC/out.sh" "$B/install.sh" 2>/dev/null
-is "-o writes to a file" "$GOOD" "$(sha "$DOC/out.sh")"
-$HGET -o "$DOC/out.bin" "$B/binary.bin" 2>/dev/null
+out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"          "installer ran" "$out"
+out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "defaults to http://"   "installer ran" "$out"
+$HGET "$B/install.sh" "$DOC/a.sh" 2>/dev/null
+is "<url> <file> writes the file"  "$GOOD" "$(sha "$DOC/a.sh")"
+$HGET "$DOC/b.sh" "$B/install.sh" 2>/dev/null
+is "<file> <url> works too"        "$GOOD" "$(sha "$DOC/b.sh")"
+$HGET "$B/binary.bin" "$DOC/out.bin" 2>/dev/null
 is "body is binary-clean" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/out.bin")"
-out=$($HGET -L "$B/sub" 2>&1);                has "-L follows a redirect"     "sub index"     "$out"
-$HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"                "1" "$?"
-$HGET >/dev/null 2>&1;                        is "no args exits 2"            "2" "$?"
-$HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"         "1" "$?"
-out=$($HGET -v "$B/install.sh" 2>&1 >/dev/null); has "-v shows headers"       "200" "$out"
+out=$($HGET "$B/sub" 2>&1);                   has "redirects are followed" "sub index" "$out"
+$HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"          "1" "$?"
+$HGET >/dev/null 2>&1;                        is "no args exits 2"      "2" "$?"
+$HGET a b c >/dev/null 2>&1;                  is "three args exits 2"   "2" "$?"
+$HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"   "1" "$?"
+$HGET "$B/install.sh" /nonexistent/dir/x >/dev/null 2>&1
+is "unwritable target exits 1" "1" "$?"
 out=$(env PATH=/nonexistent $SH ./hget https://example.com 2>&1); rc=$?
 has "https without openssl says so" "needs openssl" "$out"
 is  "https without openssl exits 1" "1" "$rc"
@@ -134,9 +138,10 @@ if [ "${HGET_NET:-0}" = "1" ]; then
     echo
     echo "network"
     out=$($HGET https://example.com 2>&1);    has "https works"        "Example Domain" "$out"
-    $HGET https://expired.badssl.com/ >/dev/null 2>&1
-    is "expired cert is refused" "1" "$?"
-    out=$($HGET -L http://github.com 2>&1);   has "http->https redirect" "<!DOCTYPE html>" "$out"
+    out=$($HGET https://expired.badssl.com/ 2>&1); rc=$?
+    is  "expired cert is refused"   "1" "$rc"
+    has "and says why, with no -v"  "certificate has expired" "$out"
+    out=$($HGET http://github.com 2>&1);      has "http->https redirect" "<!DOCTYPE html>" "$out"
 fi
 
 echo

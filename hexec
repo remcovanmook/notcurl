@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 USAGE='hexec - fetch a remote script, verify its SHA-256, then run it.
 
-usage: hexec [-n] [-v] <url> [<sha256-url>|<sha256>] [-- args...]
+usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
   -n   fetch and verify only; print the path and stop, so you can read it first
-  -v   verbose, passed through to hget
 
   hexec https://ex.io/install.sh https://ex.io/install.sh.sha256
   hexec https://ex.io/install.sh 9f86d081... -- --prefix=/opt
@@ -14,13 +13,13 @@ all. Second argument is a bare hash if 64 hex chars, else a URL to a checksum
 file (sha256sum format, matched by name). Exits with the status of the script.'
 
 set -u
-dry=0 v= sum=
+dry=0 sum=
 say()   { printf 'hexec: %s\n' "$*" >&2; }
 die()   { say "$@"; exit 1; }
 usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
 
-while getopts ':nv' o; do
-    case $o in n) dry=1 ;; v) v=-v ;; *) usage ;; esac
+while getopts ':n' o; do
+    case $o in n) dry=1 ;; *) usage ;; esac
 done
 shift $((OPTIND - 1))
 url=${1:-}; [ -n "$url" ] || usage; shift
@@ -35,7 +34,7 @@ case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256"
 tmp=$(mktemp "${TMPDIR:-/tmp}/hexec.XXXXXX") || die "cannot create temp file"
 trap 'rm -f "$tmp" "$tmp.sum"' EXIT INT TERM
 
-"$hget" -L $v -o "$tmp" "$url" || die "download failed: $url"
+"$hget" "$url" "$tmp" || die "download failed: $url"
 [ -s "$tmp" ] || die "downloaded an empty file: $url"
 
 if [ -z "$sum" ]; then
@@ -43,7 +42,7 @@ if [ -z "$sum" ]; then
 else
     want=$(printf '%s' "$sum" | tr A-F a-f)
     if [ ${#sum} -ne 64 ] || [ -n "${sum//[0-9A-Fa-f]/}" ]; then
-        "$hget" -L $v -o "$tmp.sum" "$sum" || die "download failed: $sum"
+        "$hget" "$sum" "$tmp.sum" || die "download failed: $sum"
         # First 64-hex token wins, unless a later line names our file exactly.
         want=$(awk -v n="${url##*/}" 'tolower($1)~/^[0-9a-f]{64}$/{if(!h)h=$1
                  sub(/^[*]/,"",$2); sub(/.*\//,"",$2); if($2==n){h=$1;exit}}
