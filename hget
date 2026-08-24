@@ -34,6 +34,7 @@ while :; do
     [ "$scheme" = https ] && : "${port:=443}"
     [ -n "$port" ] || die "unsupported scheme: $scheme"
     [ -n "$host" ] || die "no host in url: $url"
+    [ "$scheme" = https ] && { ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"; }
 
     if [ "$scheme" = http ]; then
         exec 5<>"/dev/tcp/$host/$port" || die "cannot connect to $host:$port"
@@ -41,11 +42,11 @@ while :; do
     else
         # -quiet implies -ign_eof, so openssl waits for the server to close.
         [ $verbose -eq 1 ] && tls=/dev/stderr || tls=/dev/null
-        exec 5< <(req | openssl s_client -quiet -verify_return_error \
+        exec 5< <(req | "$ssl" s_client -quiet -verify_return_error \
                       -servername "$host" -connect "$host:$port" 2>"$tls")
     fi
 
-    read -r proto code reason <&5 || die "no response from $host:$port (try -v)"
+    read -r proto code reason <&5 && [ -n "$code" ] || die "no usable response from $host:$port (try -v)"
     reason=${reason%$'\r'} loc=
     [ $verbose -eq 1 ] && say "$proto $code $reason"
     shopt -s nocasematch

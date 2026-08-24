@@ -142,7 +142,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-30 tests, passing on bash 3.2 and 5.3.
+33 tests, passing on bash 3.2 and 5.3.
 
 ---
 

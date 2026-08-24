@@ -86,6 +86,17 @@ $HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"                "1
 $HGET >/dev/null 2>&1;                        is "no args exits 2"            "2" "$?"
 $HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"         "1" "$?"
 out=$($HGET -v "$B/install.sh" 2>&1 >/dev/null); has "-v shows headers"       "200" "$out"
+out=$(env PATH=/nonexistent $SH ./hget https://example.com 2>&1); rc=$?
+has "https without openssl says so" "needs openssl" "$out"
+is  "https without openssl exits 1" "1" "$rc"
+# one-shot server that answers with a blank line where the status line belongs
+JP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+python3 -c "
+import socket
+s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(('127.0.0.1',$JP));s.listen(1);c,_=s.accept();c.recv(4096);c.sendall(b'\\r\\n\\r\\n');c.close()" &
+sleep 0.5
+$HGET "http://127.0.0.1:$JP/" >/dev/null 2>&1; is "malformed response exits 1" "1" "$?"
 
 echo
 echo "hexec"
