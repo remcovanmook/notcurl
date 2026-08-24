@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+#
+# hexec - fetch a remote script, verify it, then run it.
+#
+# The whole point of `curl URL | bash` is that it cannot be verified: the
+# shell is already executing line 1 while line 500 is still on the wire.
+# hexec downloads to a file first, checks a SHA-256 you supply out of band,
+# and only then hands it to an interpreter. A truncated or tampered transfer
+# fails before a single line runs.
+#
+# usage: hexec [-n] [-v] <url> [<sha256-url>|<sha256>] [-- args...]
+#          -n  fetch and verify only; print the path and stop (inspect first)
+#          -v  verbose (passed through to hget)
+#
+#   hexec https://ex.io/install.sh https://ex.io/install.sh.sha256
+#   hexec https://ex.io/install.sh 9f86d0818...b0f00a08 -- --prefix=/opt
+#
+# Redirects are always followed. Needs hget(1) alongside it or on $PATH.
+
+set -u
+
+PROG=${0##*/}
+
+die()   { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+note()  { printf '%s: %s\n' "$PROG" "$*" >&2; }
+usage() { printf 'usage: %s [-n] [-v] <url> [<sha256-url>|<sha256>] [-- args...]\n' "$PROG" >&2; exit 2; }
+
+dryrun=0
+verbose=0
+while getopts ':nv' opt; do
+    case $opt in
+        n) dryrun=1 ;;
+        v) verbose=1 ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+# Split leading positionals from the arguments destined for the script.
+url=${1:-}; [ -n "$url" ] || usage; shift
+sum=""
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then sum=$1; shift; fi
+[ $# -gt 0 ] && [ "$1" = "--" ] && shift
+
+# hget next to us wins over one on $PATH, so the pair stays self-consistent.
+HGET=${0%/*}/hget
+[ -x "$HGET" ] || HGET=$(command -v hget) || die "cannot find hget(1)"
+
+vflag=""
+[ $verbose -eq 1 ] && vflag=-v
+
+sha256_of() {
+    if   command -v sha256sum >/dev/null 2>&1; then sha256sum   < "$1" | cut -d' ' -f1
+    elif command -v shasum    >/dev/null 2>&1; then shasum -a 256 < "$1" | cut -d' ' -f1
+    elif command -v openssl   >/dev/null 2>&1; then openssl dgst -sha256 < "$1" | sed 's/.*= *//'
+    else die "no sha256 tool found (sha256sum, shasum or openssl)"
+    fi
+}
+
+tmp=$(mktemp "${TMPDIR:-/tmp}/hexec.XXXXXX") || die "cannot create temp file"
+trap 'rm -f "$tmp" "$tmp.sum"' EXIT INT TERM
+
+"$HGET" -L $vflag -o "$tmp" "$url" || die "download failed: $url"
+[ -s "$tmp" ] || die "downloaded an empty file: $url"
+
+# ---- verify ------------------------------------------------------------
+if [ -n "$sum" ]; then
+    case $sum in
+        *[!0-9A-Fa-f]* | "")
+            # Not a bare hash, so treat it as a URL to a checksum file.
+            "$HGET" -L $vflag -o "$tmp.sum" "$sum" || die "download failed: $sum"
+            want=""
+            base=${url##*/}
+            # sha256sum(1) format is "<hash>  <name>"; a file may list many.
+            while read -r hash name; do
+                case $hash in
+                    [0-9A-Fa-f]*) [ ${#hash} -eq 64 ] || continue ;;
+                    *) continue ;;
+                esac
+                if [ -z "$want" ] || [ "${name##*/}" = "$base" ]; then want=$hash; fi
+                [ "${name##*/}" = "$base" ] && break
+            done < "$tmp.sum"
+            [ -n "$want" ] || die "no sha256 found in $sum"
+            ;;
+        *)  [ ${#sum} -eq 64 ] || die "not a sha256: $sum"
+            want=$sum
+            ;;
+    esac
+
+    got=$(sha256_of "$tmp")
+    # Lowercase both sides; bash 3.2 has no ${var,,}.
+    want=$(printf '%s' "$want" | tr 'A-F' 'a-f')
+    got=$(printf  '%s' "$got"  | tr 'A-F' 'a-f')
+    if [ "$want" != "$got" ]; then
+        printf '%s: CHECKSUM MISMATCH, refusing to run\n  expected %s\n  got      %s\n' \
+            "$PROG" "$want" "$got" >&2
+        exit 1
+    fi
+    note "sha256 verified: $got"
+else
+    note "WARNING: no checksum given, running $url unverified"
+fi
+
+# ---- run ---------------------------------------------------------------
+if [ $dryrun -eq 1 ]; then
+    rm -f "$tmp.sum"
+    trap - EXIT INT TERM   # keep the script itself around to be read
+    note "not executing (-n); script saved at:"
+    printf '%s\n' "$tmp"
+    exit 0
+fi
+
+# Honour the shebang by invoking the interpreter ourselves, which also works
+# where $TMPDIR is mounted noexec. Unquoted on purpose: "#!/usr/bin/env bash"
+# has to split into two words.
+read -r shebang < "$tmp"
+case $shebang in
+    '#!'*) interp=${shebang#\#!} ;;
+    *)     interp=bash ;;
+esac
+
+note "executing $url"
+$interp "$tmp" "$@"
+status=$?
+exit $status
