@@ -2,8 +2,8 @@
 USAGE='usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
   -n   fetch and verify only, then print the path
 
-The second argument is a bare hash if 64 hex chars, else a url to a checksum
-file. Arguments after -- go to the script. Exits with the status of the script.'
+A 64-hex second argument is the hash itself, anything else a url to fetch it from.
+Args after -- go to the script, whose exit status is passed through.'
 
 set -u
 dry=0 sum=
@@ -19,7 +19,7 @@ url=${1:-}; [ -n "$url" ] || usage; shift
 [ $# -gt 0 ] && [ "$1" != -- ] && { sum=$1; shift; }
 [ "${1:-}" = -- ] && shift
 
-hget=${0%/*}/hget                      # ours before $PATH, so the pair matches
+hget=${0%/*}/hget
 [ -x "$hget" ] || hget=$(command -v hget) || die "cannot find hget(1)"
 SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || die "no sha256 tool"
 case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
@@ -36,10 +36,7 @@ else
     want=$(printf '%s' "$sum" | tr A-F a-f)
     if [ ${#sum} -ne 64 ] || [ -n "${sum//[0-9A-Fa-f]/}" ]; then
         "$hget" "$sum" >"$tmp.sum" || die "download failed: $sum"
-        # First 64-hex token wins, unless a later line names our file exactly.
-        want=$(awk -v n="${url##*/}" 'tolower($1)~/^[0-9a-f]{64}$/{if(!h)h=$1
-                 sub(/^[*]/,"",$2); sub(/.*\//,"",$2); if($2==n){h=$1;exit}}
-                 END{print tolower(h)}' "$tmp.sum")
+        want=$(awk -v n="${url##*/}" 'tolower($1)~/^[0-9a-f]{64}$/{if(!h)h=$1; sub(/^[*]/,"",$2); sub(/.*\//,"",$2); if($2==n){h=$1;exit}} END{print tolower(h)}' "$tmp.sum")
         [ -n "$want" ] || die "no sha256 for ${url##*/} in $sum"
     fi
     got=$($SHA < "$tmp" | grep -o '[0-9a-f]\{64\}' | head -1)
@@ -50,11 +47,10 @@ else
 fi
 
 if [ $dry -eq 1 ]; then
-    rm -f "$tmp.sum"; trap - EXIT INT TERM   # keep the script itself to be read
+    rm -f "$tmp.sum"; trap - EXIT INT TERM
     say "not executing (-n); script saved at:"; printf '%s\n' "$tmp"; exit 0
 fi
 
-# Run the interpreter the shebang names.
 read -r sb < "$tmp"; interp=bash
 case $sb in '#!'*) interp=${sb#\#!} ;; esac
 say "executing $url"
