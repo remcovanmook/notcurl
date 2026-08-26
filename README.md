@@ -1,7 +1,58 @@
 # hget / hexec / hwait / hmirror
 
 Four HTTP tools, in four implementations, each using only what its environment
-already has. No curl, no wget.
+already has. No curl, no wget. And one file that is a bash script and a
+PowerShell script at the same time.
+
+---
+
+## One file, two languages
+
+`portable/hget.ps1` fetches a URL on Linux, macOS, BSD **and** Windows. Not two
+files shipped together — one file, which both interpreters read as their own.
+
+```bash
+./hget.ps1 https://example.com     # Unix: the shebang wins, the extension is ignored
+.\hget.ps1 https://example.com     # Windows PowerShell
+```
+
+The whole dispatch is one token:
+
+```sh
+${true:-choose "$@"}
+```
+
+To a **shell**, `true` is an unset variable, so `${var:-default}` yields the
+default — and this calls the function `choose` with the script's arguments.
+
+To **PowerShell**, `${...}` delimits a *variable name*. The entire
+`true:-choose "$@"` is the name of one undefined variable, which evaluates to
+`$null`, and a statement whose value is `$null` emits nothing. No output, no
+error, execution continues.
+
+One line, two unrelated readings, and no external command anywhere in it — which
+is why it still works on Windows, where the `true` and `test` binaries that make
+lesser polyglots look correct do not exist.
+
+The shell implementation rides along as `#:` comments that PowerShell reads as
+comments and the shell `eval`s back. The PowerShell implementation sits below the
+dispatch, where no shell ever parses, because a shell exits at the dispatch and
+never reads on. Both halves are verified: binary body byte-exact, chunked
+decoding, redirects, 404 exit status, clean stdout on error, live HTTPS.
+
+`make portable` generates it from `bash/hget` and `powershell/hget.ps1`, so there
+is no third copy to drift. It is one file, not a set — copy it rather than
+`make install SET=portable`; `hexec`, `hwait` and `hmirror` run over it unchanged,
+since they only need a program called `hget`.
+
+**[portable/README.md](portable/README.md) is the full walkthrough** — why APE's
+positional-header trick does not transfer to two whole-file parsers, the table of
+seams that look like they should work and don't, and why zsh and busybox ash
+cannot run it.
+
+---
+
+## The four sets
 
 | set | shell | socket | TLS | tested on |
 |-----|-------|--------|-----|-----------|
@@ -190,35 +241,6 @@ reading on its own. One README per set, written as a walk through the code:
 | portable | bash **and** PowerShell in one file | [portable/README.md](portable/README.md) |
 
 ---
-
-## One file for both
-
-`portable/hget.ps1` is a single file that runs as a shell script on Unix and as a
-PowerShell script on Windows — the same body of code the `bash` and `powershell`
-sets contain, in one file rather than two.
-
-```bash
-./portable/hget.ps1 https://example.com    # Unix: the shebang wins
-.\hget.ps1 https://example.com             # Windows PowerShell
-```
-
-The name ends in `.ps1` because Windows will not run a script file without it,
-while Unix dispatches on the `#!` line and ignores the extension entirely.
-
-The seam is `$true`: a PowerShell automatic variable that interpolates as
-`True`, and an unset variable that expands to nothing in a shell. So
-`${true:-choose "$@"}` calls a shell function on one side and is an undefined
-variable — `$null`, emitting nothing — on the other, with no external command
-involved, which is why it still works on Windows. The shell implementation rides
-along as `#:` comments that PowerShell ignores and the shell `eval`s back.
-
-It is generated: `make portable` rebuilds it from `bash/hget` and
-`powershell/hget.ps1`, so there is no third copy to maintain. It is one file, not
-a set — copy it, rather than `make install SET=portable`. `hexec`, `hwait` and
-`hmirror` run over it unchanged, since they only need a program called `hget`.
-
-zsh, dash and busybox ash cannot run it, for reasons worth reading:
-[portable/README.md](portable/README.md).
 
 ---
 
