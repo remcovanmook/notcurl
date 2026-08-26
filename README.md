@@ -18,9 +18,15 @@ line 500 is still on the wire, so there is no point at which the content exists
 as a thing you could hash, read, or reject. Cut the connection halfway through
 and you have run half an installer.
 
-It also assumes curl is there. On a Debian or Alpine base image it is not, which
-is why so many install docs open with `apt-get install -y curl`. Bash, meanwhile,
-has been able to open TCP sockets on its own since 1996.
+It also assumes curl is there, which on a minimal image it often is not — hence
+all the install docs that open with `apt-get install -y curl`. Bash has been able
+to open TCP sockets on its own since 1996, so wherever bash is the system shell
+there is nothing to add.
+
+Alpine is the honest exception, and worth stating plainly: it ships neither curl
+nor bash, and busybox ash has no `/dev/tcp` at all, so `apk add bash` is exactly
+the same friction as `apk add curl`. The argument here holds for Debian, Ubuntu
+and macOS. It does not hold for Alpine.
 
 `hexec` closes both gaps: it buffers to a file, verifies, and only then executes.
 Nothing runs if the hash does not match.
