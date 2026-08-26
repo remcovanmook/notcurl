@@ -192,6 +192,17 @@ rm -f "$MD/install.sh"
 ( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR "$B/nowhere/" ) >/dev/null 2>&1
 is "absolute entry ignores base"    "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
 $HMIRROR a b c >/dev/null 2>&1;     is "too many args exits 2" "2" "$?"
+mkdir -p "$DOC/sub2/deep" && printf 'deep file\n' > "$DOC/sub2/deep/f.txt"
+DEEP=$(sha "$DOC/sub2/deep/f.txt")
+( cd "$MD" && printf 'sub2/deep/f.txt\n' | $HMIRROR "$B/" ) >/dev/null 2>&1
+is "baseurl preserves subdirs"      "$DEEP" "$(sha "$MD/sub2/deep/f.txt" 2>/dev/null)"
+( cd "$MD" && printf '%s\n' "$B/sub2/deep/f.txt" | $HMIRROR ) >/dev/null 2>&1
+is "absolute url stays flat"        "$DEEP" "$(sha "$MD/f.txt" 2>/dev/null)"
+for bad in '../esc.txt' 'a/../../esc.txt' '..'; do
+    ( cd "$MD" && printf '%s\n' "$bad" | $HMIRROR "$B/" ) >/dev/null 2>&1
+    is "refuses traversal: $bad"    "1" "$?"
+done
+is "nothing escaped the directory"  "" "$(ls "$DOC/esc.txt" 2>/dev/null)"
 
 if [ "${HGET_NET:-0}" = "1" ]; then
     echo

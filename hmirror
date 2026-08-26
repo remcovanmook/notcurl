@@ -2,9 +2,9 @@
 USAGE='usage: hmirror [baseurl] [file]
 
 Reads lines of "<url>" or "<sha256>  <name>" from file or stdin and fetches each
-into the current directory, named after the last path element. Entries that are
-not absolute urls are resolved against baseurl, so a plain sha256sum manifest
-works as it stands. Lines that carry a hash are verified, and the file is removed
+into the current directory. Entries that are not absolute urls are resolved
+against baseurl, so a plain sha256sum manifest works as it stands, and any
+directories in the name are created. A name containing .. is refused. Lines that carry a hash are verified, and the file is removed
 if it does not match. Blank lines and lines starting with # are ignored. Exits 1
 if any line failed.'
 
@@ -73,11 +73,18 @@ exec 3< "${1:-/dev/stdin}" || die "cannot read ${1:-stdin}"
 ok=0 bad=0
 while read -r a b <&3; do
     case $a in ''|'#'*) continue ;; esac
-    if [ -n "$b" ]; then want=$(printf %s "$a" | tr A-F a-f) url=$b; else want= url=$a; fi
-    url=${url#\*} url=${url#./}
-    case $url in *://*) ;; *) [ -z "$base" ] || url=$base/${url#/} ;; esac
-    name=${url##*/} name=${name%%\?*}
-    [ -n "$name" ] || { say "no filename in $url"; bad=$((bad + 1)); continue; }
+    if [ -n "$b" ]; then want=$(printf %s "$a" | tr A-F a-f) entry=$b; else want= entry=$a; fi
+    entry=${entry#\*} entry=${entry#./}
+    case $entry in
+        *://*)               url=$entry           name=${entry##*/} ;;
+        *) if [ -n "$base" ]; then url=$base/${entry#/} name=${entry#/}
+           else                    url=$entry           name=${entry##*/}; fi ;;
+    esac
+    name=${name%%\?*}
+    [ -n "$name" ] || { say "no filename in $entry"; bad=$((bad + 1)); continue; }
+    case /$name/ in */../*) say "refusing .. in path: $entry"; bad=$((bad + 1)); continue ;; esac
+    dir=${name%/*}
+    [ "$dir" = "$name" ] || mkdir -p "$dir" || { say "cannot create $dir"; bad=$((bad + 1)); continue; }
     fetch "$url" "$name" || { rm -f "$name"; bad=$((bad + 1)); continue; }
     if [ -n "$want" ]; then
         [ -n "$SHA" ] || { say "no sha256 tool, cannot verify $name"; rm -f "$name"; bad=$((bad + 1)); continue; }

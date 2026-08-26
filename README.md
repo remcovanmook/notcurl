@@ -144,8 +144,12 @@ end and exit 1.
 
 Given a baseurl, entries that are not already absolute urls are resolved against
 it, so a project's published manifest works untouched — including the leading `*`
-that `sha256sum` writes for binary mode. An entry that *is* absolute ignores the
-base. A trailing slash on the base is optional.
+that `sha256sum` writes for binary mode. Directories in the name are created, so
+`linux/tool.tgz` and `darwin/tool.tgz` do not collide. A name containing a `..`
+component is refused with an error and fails the run; nothing is written outside
+the directory you ran it in. An entry that *is* absolute ignores the base and is
+written flat, since there is no root to make its path meaningful. A trailing
+slash on the base is optional.
 
 ```
 # what a published SHASUMS256.txt actually looks like
@@ -199,7 +203,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-56 tests, passing on bash 3.2 and 5.3.
+62 tests, passing on bash 3.2 and 5.3.
 
 ---
 
