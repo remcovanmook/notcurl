@@ -128,23 +128,29 @@ included, counts as not ready.
 ## hmirror
 
 ```
-hmirror [file]
+hmirror [baseurl] [file]
 ```
 
 ```bash
-hmirror manifest.txt          # or: hmirror < manifest.txt
+hmirror manifest.txt                          # or: hmirror < manifest.txt
+hmirror https://ex.io/dist/ SHASUMS256.txt    # names resolved against the base
 ```
 
-Reads lines of `<url>` or `<sha256>  <url>` from a file or stdin and fetches
-each into the current directory, named after the last path element of the url.
-Lines with a hash are verified and the file is removed if it does not match.
-Blank lines and `#` comments are skipped. Every line is attempted; failures are
-reported at the end and exit 1.
+Reads lines of `<url>` or `<sha256>  <name>` from a file or stdin and fetches
+each into the current directory, named after the last path element. Lines with a
+hash are verified and the file is removed if it does not match. Blank lines and
+`#` comments are skipped. Every line is attempted; failures are reported at the
+end and exit 1.
+
+Given a baseurl, entries that are not already absolute urls are resolved against
+it, so a project's published manifest works untouched — including the leading `*`
+that `sha256sum` writes for binary mode. An entry that *is* absolute ignores the
+base. A trailing slash on the base is optional.
 
 ```
-# a manifest
-9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  https://ex.io/tool.tar.gz
-https://ex.io/README
+# what a published SHASUMS256.txt actually looks like
+9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  tool.tar.gz
+232f4ee673fdd82c622a4d0c7543e49482f2eeb8b312460f3196fe0cdc251b37  *blob.bin
 ```
 
 ---
@@ -193,7 +199,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-52 tests, passing on bash 3.2 and 5.3.
+56 tests, passing on bash 3.2 and 5.3.
 
 ---
 

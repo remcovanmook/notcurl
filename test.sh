@@ -182,6 +182,16 @@ is "mismatch removes the file" "" "$(ls "$MD/install.sh" 2>/dev/null)"
 is "skips blanks and comments" "0" "$?"
 ( cd "$MD" && printf '%s\n' "$B/nope.txt" | $HMIRROR ) >/dev/null 2>&1
 is "a 404 line fails the run"  "1" "$?"
+rm -f "$MD/install.sh"
+( cd "$MD" && printf '%s  install.sh\n' "$GOOD" | $HMIRROR "$B" ) >/dev/null 2>&1
+is "baseurl resolves a bare name"   "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+rm -f "$MD/install.sh"
+( cd "$MD" && printf '%s  *install.sh\n' "$GOOD" | $HMIRROR "$B/" ) >/dev/null 2>&1
+is "trailing slash and * marker ok" "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+rm -f "$MD/install.sh"
+( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR "$B/nowhere/" ) >/dev/null 2>&1
+is "absolute entry ignores base"    "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+$HMIRROR a b c >/dev/null 2>&1;     is "too many args exits 2" "2" "$?"
 
 if [ "${HGET_NET:-0}" = "1" ]; then
     echo
