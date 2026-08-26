@@ -76,8 +76,7 @@ echo
 echo "hget"
 
 out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"          "installer ran" "$out"
-$HGET "127.0.0.1:$PORT/install.sh" >/dev/null 2>&1
-is "bare host:port is rejected" "1" "$?"
+out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "bare host:port/path works" "installer ran" "$out"
 $HGET "$B/install.sh" >"$DOC/a.sh" 2>/dev/null
 is "body goes to stdout"  "$GOOD" "$(sha "$DOC/a.sh")"
 $HGET "$B/binary.bin" >"$DOC/out.bin" 2>/dev/null
