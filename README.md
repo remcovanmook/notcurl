@@ -1,6 +1,7 @@
-# hget / hexec
+# hget / hexec / hwait / hmirror
 
-An HTTP client written in bash, and a verifying replacement for `curl URL | bash`.
+A small family of HTTP tools written in bash, with no curl and no wget anywhere
+in the path.
 
 `hget` fetches a URL using bash's own `/dev/tcp` socket redirection. Over HTTPS
 it shells out to `openssl s_client` for the handshake and nothing else. There is
@@ -30,6 +31,12 @@ and macOS. It does not hold for Alpine.
 
 `hexec` closes both gaps: it buffers to a file, verifies, and only then executes.
 Nothing runs if the hash does not match.
+
+The four tools are deliberately separate implementations rather than one library
+with front-ends. Each is a single file that works on its own, which is the point
+of a tool you might have to paste onto a box that has nothing. The cost is that
+the socket and response code exists four times, and a fix to one is a fix to make
+four times.
 
 ---
 
@@ -102,7 +109,46 @@ Arguments after `--` are passed to the fetched script. Its exit status becomes
 With no checksum, `hexec` warns loudly and proceeds — no worse than
 `curl | bash`, and it tells you which one you are doing.
 
+## hwait
+
+```
+hwait <url> [timeout]
+```
+
+```bash
+hwait http://127.0.0.1:8080/health 30 && ./run-the-tests
+```
+
+Polls once a second until the url answers 2xx, then exits 0. Exits 1 if the
+timeout passes first, default 60 seconds. A refused connection is "not ready
+yet" rather than an error, which is the whole point — it is for waiting on a
+service that has not finished starting. Anything that is not 2xx, a 404
+included, counts as not ready.
+
+## hmirror
+
+```
+hmirror [file]
+```
+
+```bash
+hmirror manifest.txt          # or: hmirror < manifest.txt
+```
+
+Reads lines of `<url>` or `<sha256>  <url>` from a file or stdin and fetches
+each into the current directory, named after the last path element of the url.
+Lines with a hash are verified and the file is removed if it does not match.
+Blank lines and `#` comments are skipped. Every line is attempted; failures are
+reported at the end and exit 1.
+
+```
+# a manifest
+9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  https://ex.io/tool.tar.gz
+https://ex.io/README
+```
+
 ---
+
 
 ## How it works
 
@@ -147,7 +193,7 @@ make check         # also runs the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
 ```
 
-39 tests, passing on bash 3.2 and 5.3.
+52 tests, passing on bash 3.2 and 5.3.
 
 ---
 

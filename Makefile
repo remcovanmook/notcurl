@@ -6,10 +6,10 @@ all:
 
 install:
 	install -d $(BINDIR)
-	install -m 0755 hget hexec $(BINDIR)
+	install -m 0755 hget hexec hwait hmirror $(BINDIR)
 
 uninstall:
-	rm -f $(BINDIR)/hget $(BINDIR)/hexec
+	rm -f $(BINDIR)/hget $(BINDIR)/hexec $(BINDIR)/hwait $(BINDIR)/hmirror
 
 test:
 	./test.sh

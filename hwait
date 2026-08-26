@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+USAGE='usage: hwait <url> [timeout]
+
+Polls until the url answers 2xx, then exits 0. Default timeout 60 seconds.'
+
+set -u
+say()   { printf 'hwait: %s\n' "$*" >&2; }
+die()   { say "$@"; exit 1; }
+req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hwait\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
+
+[ $# -ge 1 ] && [ $# -le 2 ] || { printf '%s\n' "$USAGE" >&2; exit 2; }
+url=$1 timeout=${2:-60}
+case $timeout in ''|*[!0-9]*) die "timeout must be a whole number of seconds: $timeout" ;; esac
+
+rest=${url#*://} scheme=http
+[ "$rest" != "$url" ] && scheme=${url%%://*}
+hostport=${rest%%/*} path=/
+[ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
+host=${hostport%%:*} port=${hostport##*:}
+[ "$port" = "$hostport" ] && port=
+case $scheme in http) port=${port:-80} ;; https) port=${port:-443} ;; *) die "unsupported scheme: $scheme" ;; esac
+[ -n "$host" ] || die "no host in url: $url"
+if [ "$scheme" = https ]; then ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"; fi
+
+probe() {
+    local proto code reason
+    if [ "$scheme" = http ]; then
+        { exec 5<>"/dev/tcp/$host/$port"; } 2>/dev/null || return 1
+        req >&5
+    else
+        exec 5< <(req | "$ssl" s_client -quiet -verify_return_error -servername "$host" -connect "$host:$port" 2>/dev/null)
+    fi
+    read -t 10 -r proto code reason <&5 2>/dev/null
+    exec 5<&-
+    [[ ${code:-} == 2* ]]
+}
+
+SECONDS=0
+while :; do
+    probe && exit 0
+    [ $SECONDS -lt "$timeout" ] || die "gave up on $url after ${timeout}s"
+    sleep 1
+done

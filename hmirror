@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+USAGE='usage: hmirror [file]
+
+Reads lines of "<url>" or "<sha256>  <url>" from file or stdin and fetches each
+into the current directory, named after the last path element of the url. Lines
+that carry a hash are verified, and the file is removed if it does not match.
+Blank lines and lines starting with # are ignored. Exits 1 if any line failed.'
+
+set -u
+say() { printf 'hmirror: %s\n' "$*" >&2; }
+die() { say "$@"; exit 1; }
+req() { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hmirror\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
+
+[ $# -le 1 ] || { printf '%s\n' "$USAGE" >&2; exit 2; }
+ssl=$(command -v openssl) || ssl=
+SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || SHA=
+case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
+
+parse() {
+    local u=$1 rest
+    rest=${u#*://} scheme=http
+    [ "$rest" != "$u" ] && scheme=${u%%://*}
+    hostport=${rest%%/*} path=/
+    [ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
+    host=${hostport%%:*} port=${hostport##*:}
+    [ "$port" = "$hostport" ] && port=
+    case $scheme in http) port=${port:-80} ;; https) port=${port:-443} ;; *) say "unsupported scheme: $scheme"; return 1 ;; esac
+    [ -n "$host" ] || { say "no host in url: $u"; return 1; }
+}
+
+get() {
+    local proto h
+    parse "$1" || return 1
+    if [ "$scheme" = http ]; then
+        { exec 5<>"/dev/tcp/$host/$port"; } 2>/dev/null || { say "cannot connect to $host:$port"; return 1; }
+        req >&5
+    else
+        [ -x "${ssl:-}" ] || { say "https needs openssl(1)"; return 1; }
+        exec 5< <(req | "$ssl" s_client -quiet -verify_return_error -servername "$host" -connect "$host:$port" 2>/dev/null)
+    fi
+    read -r proto code reason <&5 && [ -n "$code" ] || { say "no usable response from $host:$port"; return 1; }
+    reason=${reason%$'\r'} loc=
+    shopt -s nocasematch
+    while IFS= read -r h <&5 && h=${h%$'\r'} && [ -n "$h" ]; do
+        [[ $h == location:* ]] && read -r loc <<<"${h#*:}"
+    done
+    shopt -u nocasematch
+}
+
+fetch() {
+    local u=$1 out=$2 hop=0
+    while :; do
+        get "$u" || return 1
+        [ -n "$loc" ] && [[ $code == 30[12378] ]] || break
+        [ $((hop += 1)) -le 5 ] || { say "more than 5 redirects: $u"; return 1; }
+        case $loc in
+            *://*) u=$loc ;;
+            /*)    u=$scheme://$hostport$loc ;;
+            *)     u=$scheme://$hostport${path%/*}/$loc ;;
+        esac
+        exec 5<&-
+    done
+    [[ $code == 2* ]] || { say "$u returned $code $reason"; return 1; }
+    cat <&5 >"$out" || { say "cannot write $out"; return 1; }
+}
+
+exec 3< "${1:-/dev/stdin}" || die "cannot read ${1:-stdin}"
+ok=0 bad=0
+while read -r a b <&3; do
+    case $a in ''|'#'*) continue ;; esac
+    if [ -n "$b" ]; then want=$(printf %s "$a" | tr A-F a-f) url=$b; else want= url=$a; fi
+    name=${url##*/} name=${name%%\?*}
+    [ -n "$name" ] || { say "no filename in $url"; bad=$((bad + 1)); continue; }
+    fetch "$url" "$name" || { rm -f "$name"; bad=$((bad + 1)); continue; }
+    if [ -n "$want" ]; then
+        [ -n "$SHA" ] || { say "no sha256 tool, cannot verify $name"; rm -f "$name"; bad=$((bad + 1)); continue; }
+        got=$($SHA < "$name" | grep -o '[0-9a-f]\{64\}' | head -1)
+        [ "$want" = "$got" ] || { say "CHECKSUM MISMATCH for $name, removed"; rm -f "$name"; bad=$((bad + 1)); continue; }
+        say "$name verified"
+    else
+        say "$name (unverified)"
+    fi
+    ok=$((ok + 1))
+done
+say "$ok fetched, $bad failed"
+[ $bad -eq 0 ]

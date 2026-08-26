@@ -13,8 +13,11 @@ set -u
 cd "${0%/*}" || exit 1
 
 SH=${BASH_UNDER_TEST:-/bin/bash}
+ROOT=$PWD
 HGET="$SH ./hget"
 HEXEC="$SH ./hexec"
+HWAIT="$SH $ROOT/hwait"
+HMIRROR="$SH $ROOT/hmirror"
 
 pass=0
 fail=0
@@ -45,6 +48,7 @@ echo "failing on purpose"
 exit 42
 EOF
 head -c 4096 /dev/urandom > "$DOC/binary.bin"
+printf 'b file\n' > "$DOC/b.txt"
 
 sha() {
     if   command -v sha256sum >/dev/null 2>&1; then sha256sum   < "$1" | cut -d' ' -f1
@@ -145,6 +149,39 @@ is "missing checksum exits 1" "1" "$?"
 $HEXEC "$B/install.sh" "not-a-valid-hash!" >/dev/null 2>&1
 is "garbage checksum exits 1" "1" "$?"
 is "temp files cleaned up" "0" "$(ls "${TMPDIR:-/tmp}"/hexec.* 2>/dev/null | wc -l | tr -d ' ')"
+
+echo
+echo "hwait"
+
+$HWAIT "$B/" 5 >/dev/null 2>&1;                 is "healthy url exits 0"    "0" "$?"
+$HWAIT "http://127.0.0.1:1/" 2 >/dev/null 2>&1; is "dead port times out"    "1" "$?"
+$HWAIT "$B/nope" 2 >/dev/null 2>&1;             is "404 is not healthy"     "1" "$?"
+$HWAIT >/dev/null 2>&1;                         is "no args exits 2"        "2" "$?"
+$HWAIT "$B/" abc >/dev/null 2>&1;               is "bad timeout exits 1"    "1" "$?"
+LP2=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+( sleep 2; cd "$DOC" && exec python3 -m http.server "$LP2" --bind 127.0.0.1 ) >/dev/null 2>&1 &
+LATE=$!
+$HWAIT "http://127.0.0.1:$LP2/" 20 >/dev/null 2>&1; is "waits for a late server" "0" "$?"
+kill $LATE 2>/dev/null; pkill -f "http.server $LP2" 2>/dev/null
+
+echo
+echo "hmirror"
+
+MD=$DOC/mirror; mkdir -p "$MD"
+( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR ) >/dev/null 2>&1
+is "reads urls from stdin"     "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+( cd "$MD" && printf '%s  %s\n' "$GOOD" "$B/install.sh" > m1 && $HMIRROR m1 ) >/dev/null 2>&1
+is "verifies a hashed line"    "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+( cd "$MD" && printf '%s\n' "$B/binary.bin" | $HMIRROR ) >/dev/null 2>&1
+is "binary is intact"          "$(sha "$DOC/binary.bin")" "$(sha "$MD/binary.bin" 2>/dev/null)"
+BADH=$(printf 'd%.0s' $(seq 1 64))
+( cd "$MD" && printf '%s  %s\n' "$BADH" "$B/install.sh" > m2 && $HMIRROR m2 ) >/dev/null 2>&1
+is "mismatch exits 1"          "1" "$?"
+is "mismatch removes the file" "" "$(ls "$MD/install.sh" 2>/dev/null)"
+( cd "$MD" && printf '# comment\n\n%s\n' "$B/b.txt" | $HMIRROR ) >/dev/null 2>&1
+is "skips blanks and comments" "0" "$?"
+( cd "$MD" && printf '%s\n' "$B/nope.txt" | $HMIRROR ) >/dev/null 2>&1
+is "a 404 line fails the run"  "1" "$?"
 
 if [ "${HGET_NET:-0}" = "1" ]; then
     echo
