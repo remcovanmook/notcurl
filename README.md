@@ -11,19 +11,40 @@ already has. No curl, no wget.
 | `powershell/` | pwsh 7 | `TcpClient` | `SslStream` | pwsh 7.6 on macOS |
 
 The sets share no code. Each tool is a single file that runs on its own, so one
-can be copied to a host that has nothing else.
+can be copied to a host that has nothing else. No tool is over 3.7 KB and no
+complete set over 11 KB, so keeping one around alongside whatever else the image
+has costs nothing worth measuring.
 
 ---
 
 ## Why
 
-`curl URL | bash` cannot be verified. The shell executes line 1 while line 500 is
-still on the wire, so the content never exists as something you could hash, read
-or reject. A connection cut halfway through runs half an installer.
+**A pipe into a shell cannot be verified.** `curl URL | bash` executes line 1
+while line 500 is still on the wire, so the content never exists as something you
+could hash, read or reject. A connection cut halfway through runs half an
+installer. `hexec` fetches to a file, checks it against a SHA-256 you supply out
+of band, and runs it only if the hash matches — so a truncated download fails
+verification instead of half-executing.
 
-It also assumes curl is installed, which on a minimal image it often is not.
-`hexec` fetches to a file, checks it against a SHA-256 you supply out of band,
-and runs it only if the hash matches.
+**curl is often not there.** On a minimal image neither curl nor wget is
+installed, and pulling one in to fetch a single file means a package manager, an
+index refresh and a larger image than you started with. Each set here uses only
+what its environment already ships.
+
+**Removing curl is not an egress control.** Deleting curl and wget, or
+allowlisting which binaries may execute, is regularly presented as a way to stop
+a host making outbound HTTP requests. It is not one, and these four sets are the
+demonstration. bash speaks TCP through `/dev/tcp`, a feature of the shell itself.
+zsh speaks it through a module shipped in its own distribution. busybox speaks it
+through the `nc` applet inside the single binary that *is* the userland — you
+cannot remove it without removing `sh`. pwsh speaks it through .NET's
+`TcpClient`, which is part of the runtime pwsh is built on. None of this is
+exotic: it is one file of ordinary shell per tool, no compiler, no download, and
+in the ash and powershell sets HTTPS works with nothing added either.
+
+If a host must not reach the network, stop it at the network: no route, egress
+filtering, or a proxy that authenticates. An inventory of which binaries are
+present tells you very little — the shell you left behind is an HTTP client.
 
 Each tool is a standalone file. The socket and response code is repeated in each
 rather than shared, so any one of them can be copied somewhere on its own.
@@ -51,8 +72,8 @@ Pick a set with `make install SET=zsh`.
 ## Install
 
 ```bash
-git clone https://github.com/remcovanmook/hget ~/src/hget
-cd ~/src/hget
+git clone https://github.com/remcovanmook/notcurl ~/src/notcurl
+cd ~/src/notcurl
 sudo make install            # /usr/local/bin, override with PREFIX=
 ```
 
@@ -142,19 +163,62 @@ trailing slash on the base is optional.
 
 ## How it works
 
-`hget` opens `/dev/tcp/$host/$port` on fd 5 and writes a request. For HTTPS the
-same fd comes from a process substitution around `openssl s_client`, so everything
-after the connect is one code path.
+Every set does the same four things: open a socket, write a request, read the
+status line and headers one byte at a time so the body is not buffered away, then
+hand the rest of the stream over untouched.
 
-The request is HTTP/1.0, which forbids chunked transfer-encoding. Servers send it
-anyway — github.com does — so the response headers are checked and the body
-de-framed when they say so. Headers are consumed with `read`, then `cat <&5`
-hands over the rest untouched, binary included.
+The request is HTTP/1.0, which forbids chunked transfer-encoding and has no
+keep-alive, so the server closing the connection is what marks the end of the
+body — no `Content-Length` accounting needed. Servers send chunked anyway
+(github.com does), so the headers are checked and the body de-framed when they
+say so.
 
 `hexec` writes to a file rather than a pipe, which is what makes the content
-hashable before anything runs, and makes a truncated download fail verification
-instead of half-executing. It invokes the interpreter named in the shebang, which
-also works where `$TMPDIR` is mounted `noexec`.
+hashable before anything runs. It invokes the interpreter named in the shebang
+rather than executing the file, so the download never needs an execute bit and
+still works where `$TMPDIR` is mounted `noexec`.
+
+How each set gets its socket, its TLS and its bytes differs enough to be worth
+reading on its own. One README per set, written as a walk through the code:
+
+| set | how it connects | walkthrough |
+|-----|-----------------|-------------|
+| bash | `/dev/tcp` redirection, openssl for TLS | [bash/README.md](bash/README.md) |
+| zsh | `ztcp` from `zsh/net/tcp`, openssl for TLS | [zsh/README.md](zsh/README.md) |
+| ash | busybox `nc -e`, busybox `ssl_client` | [ash/README.md](ash/README.md) |
+| powershell | .NET `TcpClient` and `SslStream` | [powershell/README.md](powershell/README.md) |
+| portable | bash **and** PowerShell in one file | [portable/README.md](portable/README.md) |
+
+---
+
+## One file for both
+
+`portable/hget.ps1` is a single file that runs as a shell script on Unix and as a
+PowerShell script on Windows — the same body of code the `bash` and `powershell`
+sets contain, in one file rather than two.
+
+```bash
+./portable/hget.ps1 https://example.com    # Unix: the shebang wins
+.\hget.ps1 https://example.com             # Windows PowerShell
+```
+
+The name ends in `.ps1` because Windows will not run a script file without it,
+while Unix dispatches on the `#!` line and ignores the extension entirely.
+
+The seam is `$true`: a PowerShell automatic variable that interpolates as
+`True`, and an unset variable that expands to nothing in a shell. So
+`${true:-choose "$@"}` calls a shell function on one side and is an undefined
+variable — `$null`, emitting nothing — on the other, with no external command
+involved, which is why it still works on Windows. The shell implementation rides
+along as `#:` comments that PowerShell ignores and the shell `eval`s back.
+
+It is generated: `make portable` rebuilds it from `bash/hget` and
+`powershell/hget.ps1`, so there is no third copy to maintain. It is one file, not
+a set — copy it, rather than `make install SET=portable`. `hexec`, `hwait` and
+`hmirror` run over it unchanged, since they only need a program called `hget`.
+
+zsh, dash and busybox ash cannot run it, for reasons worth reading:
+[portable/README.md](portable/README.md).
 
 ---
 
@@ -177,6 +241,11 @@ pwsh hexec.ps1 https://ex.io/i.sh <sha> --prefix=/opt
   many of the same minimal images that lack curl. The ash and powershell sets do
   not: busybox `ssl_client` and .NET `SslStream` are already present where those
   run.
+- The busybox that gives the ash set its socket normally gives you a `wget`
+  applet too, which covers `hget` and most of `hwait`. It does not cover `hexec`
+  or `hmirror`, and those two run over any program that takes a url and writes
+  the body to stdout — `wget` included.
+  [ash/README.md](ash/README.md#about-busybox-wget) has the long version.
 - A checksum is only as good as its source. A hash served from the host that
   serves the script defends against corruption, truncation and a MITM holding a
   valid certificate — not against a compromised origin. Pin it elsewhere.
@@ -202,6 +271,11 @@ driven against fixtures served from another host.
 
 ---
 
-## Licence
+## Author and licence
 
-Apache 2.0. See [LICENSE](LICENSE).
+2026 Remco van Mook — [@rvmnl](https://github.com/rvmnl).
+Apache 2.0; see [LICENSE](LICENSE).
+
+Every tool carries the same line under its shebang, because these files are
+meant to be copied out on their own and a file with no provenance is a file you
+should not run.

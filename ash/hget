@@ -1,4 +1,5 @@
 #!/bin/sh
+# 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl
 USAGE='usage: hget <url>'
 
 say() { printf 'hget: %s\n' "$*" >&2; }

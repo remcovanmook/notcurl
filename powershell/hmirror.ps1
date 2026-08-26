@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+# 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl
 # usage: hmirror [baseurl] [file]
 param([Parameter(Position = 0)][string]$A, [Parameter(Position = 1)][string]$B)
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl
 #
 # test.sh - runs the same suite against every implementation set this host can
 # run. Needs python3 for the test servers.
