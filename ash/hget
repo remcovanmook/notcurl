@@ -1,0 +1,77 @@
+#!/bin/sh
+USAGE='usage: hget <url>'
+
+say() { printf 'hget: %s\n' "$*" >&2; }
+die() { say "$@"; exit 1; }
+
+[ $# -eq 1 ] || { printf '%s\n' "$USAGE" >&2; exit 2; }
+url=$1
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/hget.XXXXXX") || die "cannot create temp dir"
+trap 'rm -rf "$tmp"' EXIT INT TERM
+H_REQ=$tmp/req H_ERR=$tmp/err raw=$tmp/raw
+export H_REQ H_ERR H_HOST
+hop=0
+
+while :; do
+    rest=${url#*://}; scheme=http
+    [ "$rest" != "$url" ] && scheme=${url%%://*}
+    hostport=${rest%%/*}; upath=/
+    [ "${rest#*/}" != "$rest" ] && upath=/${rest#*/}
+    host=${hostport%%:*}; port=${hostport##*:}
+    [ "$port" = "$hostport" ] && port=
+    case $scheme in
+        http)  port=${port:-80} ;;
+        https) port=${port:-443} ;;
+        *) die "unsupported scheme: $scheme" ;;
+    esac
+    [ -n "$host" ] || die "no host in url: $url"
+    H_HOST=$host
+
+    printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$upath" "$hostport" >"$H_REQ"
+    : >"$raw"; : >"$H_ERR"
+    exec 4>"$raw"
+    if [ "$scheme" = http ]; then
+        nc "$host" "$port" -e /bin/sh -c 'cat "$H_REQ"; cat <&0 >&4 2>"$H_ERR"' 2>/dev/null
+    else
+        command -v ssl_client >/dev/null 2>&1 || die "https needs ssl_client(1)"
+        nc "$host" "$port" -e /bin/sh -c 'exec 3<&0; exec ssl_client -s 3 -n "$H_HOST" <"$H_REQ" >&4 2>"$H_ERR"' 2>/dev/null
+    fi
+    exec 4>&-
+    [ -s "$raw" ] || { [ -s "$H_ERR" ] && sed 's/^/hget: /' "$H_ERR" >&2; die "no usable response from $host:$port"; }
+
+    exec 5<"$raw"
+    code=
+    while read -r proto code reason <&5; do
+        case $proto in HTTP/*) break ;; esac
+    done
+    [ -n "$code" ] || die "no usable response from $host:$port"
+    reason=${reason%$(printf '\r')}
+    loc= chunked=
+    while IFS= read -r h <&5; do
+        h=${h%$(printf '\r')}
+        [ -n "$h" ] || break
+        case $h in
+            [Ll]ocation:*) loc=$(printf '%s' "${h#*:}" | tr -d ' ') ;;
+            [Tt]ransfer-[Ee]ncoding:*chunked*) chunked=1 ;;
+        esac
+    done
+
+    case $code$loc in 30[12378]?*) ;; *) break ;; esac
+    hop=$((hop + 1)); [ $hop -le 5 ] || die "more than 5 redirects"
+    case $loc in
+        *://*) url=$loc ;;
+        /*)    url=$scheme://$hostport$loc ;;
+        *)     url=$scheme://$hostport${upath%/*}/$loc ;;
+    esac
+    exec 5<&-
+done
+
+case $code in 2*) ;; *) die "$url returned $code $reason" ;; esac
+[ -n "$chunked" ] || { cat <&5; exit; }
+while IFS= read -r n <&5; do
+    n=${n%$(printf '\r')}; n=${n%%;*}
+    case $n in ''|*[!0-9A-Fa-f]*) die "bad chunk header from $url" ;; esac
+    [ $((0x$n)) -gt 0 ] || break
+    dd bs=$((0x$n)) count=1 <&5 2>/dev/null
+    IFS= read -r n <&5
+done

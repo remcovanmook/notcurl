@@ -1,0 +1,61 @@
+#!/usr/bin/env zsh
+USAGE='usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
+  -n   fetch and verify only, then print the path
+
+The second argument is a bare hash if 64 hex chars, else a url to a checksum
+file. Arguments after -- go to the script. Exits with the status of the script.'
+
+emulate -L zsh
+setopt nounset
+
+dry=0 sum=
+say()   { print -u2 -r -- "hexec: $*" }
+die()   { say "$@"; exit 1 }
+usage() { print -u2 -r -- "$USAGE"; exit 2 }
+
+while getopts ':n' o; do
+    case $o in n) dry=1 ;; *) usage ;; esac
+done
+shift $((OPTIND - 1))
+url=${1:-}; [[ -n $url ]] || usage; shift
+(( $# > 0 )) && [[ $1 != -- ]] && { sum=$1; shift }
+[[ ${1:-} == -- ]] && shift
+
+hget=${0:h}/hget
+[[ -x $hget ]] || hget=$(command -v hget) || die "cannot find hget(1)"
+SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || die "no sha256 tool"
+case ${SHA:t} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
+
+tmp=$(mktemp "${TMPDIR:-/tmp}/hexec.XXXXXX") || die "cannot create temp file"
+trap 'rm -f $tmp $tmp.sum' EXIT INT TERM
+
+$hget $url >$tmp || die "download failed: $url"
+[[ -s $tmp ]] || die "downloaded an empty file: $url"
+
+if [[ -z $sum ]]; then
+    say "WARNING: no checksum given, running $url unverified"
+else
+    want=${(L)sum}
+    if (( ${#sum} != 64 )) || [[ -n ${sum//[0-9A-Fa-f]/} ]]; then
+        $hget $sum >$tmp.sum || die "download failed: $sum"
+        want=$(awk -v n="${url:t}" 'tolower($1)~/^[0-9a-f]{64}$/{if(!h)h=$1
+                 sub(/^[*]/,"",$2); sub(/.*\//,"",$2); if($2==n){h=$1;exit}}
+                 END{print tolower(h)}' $tmp.sum)
+        [[ -n $want ]] || die "no sha256 for ${url:t} in $sum"
+    fi
+    got=$(${=SHA} < $tmp | grep -o '[0-9a-f]\{64\}' | head -1)
+    [[ $want == "$got" ]] || die "CHECKSUM MISMATCH, refusing to run
+  expected $want
+  got      $got"
+    say "sha256 verified: $got"
+fi
+
+if (( dry )); then
+    rm -f $tmp.sum; trap - EXIT INT TERM
+    say "not executing (-n); script saved at:"; print -r -- $tmp; exit 0
+fi
+
+read -r sb < $tmp; interp=bash
+case $sb in ('#!'*) interp=${sb#\#!} ;; esac
+say "executing $url"
+${=interp} $tmp "$@"

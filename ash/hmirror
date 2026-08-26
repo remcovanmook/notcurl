@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 USAGE='usage: hmirror [baseurl] [file]
 
 Reads lines of "<url>" or "<sha256>  <name>" from file or stdin and fetches each
@@ -7,7 +7,6 @@ against baseurl, and directories in the name are created. A name containing ..
 is refused. Blank lines and lines starting with # are ignored. Exits 1 if any
 line failed.'
 
-set -u
 say()   { printf 'hmirror: %s\n' "$*" >&2; }
 die()   { say "$@"; exit 1; }
 usage() { printf '%s\n' "$USAGE" >&2; exit 2; }

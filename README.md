@@ -1,8 +1,17 @@
 # hget / hexec / hwait / hmirror
 
-Four HTTP tools written in bash. `hget` fetches a URL over bash's own `/dev/tcp`
-socket redirection, calling `openssl s_client` for the TLS handshake and nothing
-else. No curl, no wget.
+Four HTTP tools, in four implementations, each using only what its environment
+already has. No curl, no wget.
+
+| set | shell | socket | TLS | tested on |
+|-----|-------|--------|-----|-----------|
+| `bash/` | bash 3.2+ | `/dev/tcp` | `openssl s_client` | macOS 26, bash 3.2 and 5.3 |
+| `zsh/` | zsh 5.9 | `zmodload zsh/net/tcp` | `openssl s_client` | macOS 26 |
+| `ash/` | POSIX sh | busybox `nc -e` | busybox `ssl_client` | Alpine 3.24 |
+| `powershell/` | pwsh 7 | `TcpClient` | `SslStream` | pwsh 7.6 on macOS |
+
+The sets share no code. Each tool is a single file that runs on its own, so one
+can be copied to a host that has nothing else.
 
 ---
 
@@ -23,16 +32,19 @@ rather than shared, so any one of them can be copied somewhere on its own.
 
 ## Requirements
 
-- bash 3.2 or newer, built with `--enable-net-redirections` — the default on
-  Debian, Ubuntu and macOS. Stock `/bin/bash` on macOS is 3.2 and works.
-- `cat(1)`, the only external command on the HTTP path. Bash variables cannot
-  hold NUL bytes, so something else has to move the body.
-- `openssl(1)`, for HTTPS only.
-- `sha256sum`, `shasum` or `openssl`, for `hexec` and `hmirror` verification.
-- `python3`, to run the test suite only.
+Common to every set: `cat` or an equivalent to move the body, because no shell
+variable can hold a NUL byte; and `sha256sum`, `shasum` or `openssl` for the
+verification in `hexec` and `hmirror`. `python3` runs the test suite only.
 
-Alpine ships neither bash nor curl, and busybox ash has no `/dev/tcp`, so these
-need `apk add bash` there.
+- **bash** needs bash built with `--enable-net-redirections`, the default on
+  Debian, Ubuntu and macOS, and `openssl` for HTTPS.
+- **zsh** needs the `zsh/net/tcp` module, which ships with zsh, and `openssl`
+  for HTTPS.
+- **ash** needs busybox `nc` with `-e` and busybox `ssl_client`, both in the
+  Alpine base image. Nothing to install there.
+- **powershell** needs pwsh 7. Sockets and TLS come from .NET, so nothing else.
+
+Pick a set with `make install SET=zsh`.
 
 ---
 
@@ -134,8 +146,9 @@ trailing slash on the base is optional.
 same fd comes from a process substitution around `openssl s_client`, so everything
 after the connect is one code path.
 
-The request is HTTP/1.0, which forbids chunked transfer-encoding, so there is no
-chunk framing to decode in shell. Headers are consumed with `read`, then `cat <&5`
+The request is HTTP/1.0, which forbids chunked transfer-encoding. Servers send it
+anyway — github.com does — so the response headers are checked and the body
+de-framed when they say so. Headers are consumed with `read`, then `cat <&5`
 hands over the rest untouched, binary included.
 
 `hexec` writes to a file rather than a pipe, which is what makes the content
@@ -145,10 +158,25 @@ also works where `$TMPDIR` is mounted `noexec`.
 
 ---
 
+## Differences between the sets
+
+The tools behave identically apart from one thing: PowerShell consumes a bare
+`--` before the caller sees it, so `hexec` there takes the script's arguments
+straight after the checksum instead of behind a separator.
+
+```bash
+hexec https://ex.io/i.sh <sha> -- --prefix=/opt     # bash, zsh, ash
+pwsh hexec.ps1 https://ex.io/i.sh <sha> --prefix=/opt
+```
+
+---
+
 ## Limitations
 
-- HTTPS needs the openssl binary, which is missing from many of the same minimal
-  images that lack curl. Only the HTTP path is dependency-free.
+- The bash and zsh sets need the openssl binary for HTTPS, which is missing from
+  many of the same minimal images that lack curl. The ash and powershell sets do
+  not: busybox `ssl_client` and .NET `SslStream` are already present where those
+  run.
 - A checksum is only as good as its source. A hash served from the host that
   serves the script defends against corruption, truncation and a MITM holding a
   valid certificate — not against a compromised origin. Pin it elsewhere.
@@ -161,12 +189,16 @@ also works where `$TMPDIR` is mounted `noexec`.
 ## Tests
 
 ```bash
-make test          # local only, spins up its own server on a free port
-make check         # also runs the tests that reach the internet
-BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
+make test               # every set this host can run
+./test.sh zsh           # just one
+make check              # also the tests that reach the internet
+BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh bash
 ```
 
-62 tests, passing on bash 3.2 and 5.3.
+The harness detects which sets the host can run and skips the rest. 36 tests per
+set. bash, zsh and powershell pass on macOS; ash passes on Alpine, where the
+harness itself cannot run — Alpine has neither bash nor python3 — so that set is
+driven against fixtures served from another host.
 
 ---
 

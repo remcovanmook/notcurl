@@ -1,0 +1,53 @@
+#!/usr/bin/env zsh
+USAGE='usage: hmirror [baseurl] [file]
+
+Reads lines of "<url>" or "<sha256>  <name>" from file or stdin and fetches each
+into the current directory. Entries that are not absolute urls are resolved
+against baseurl, and directories in the name are created. A name containing ..
+is refused. Blank lines and lines starting with # are ignored. Exits 1 if any
+line failed.'
+
+emulate -L zsh
+setopt nounset
+
+say()   { print -u2 -r -- "hmirror: $*" }
+die()   { say "$@"; exit 1 }
+usage() { print -u2 -r -- "$USAGE"; exit 2 }
+
+base=
+case ${1:-} in (http://*|https://*) base=${1%/}; shift ;; esac
+(( $# <= 1 )) || usage
+hget=${0:h}/hget
+[[ -x $hget ]] || hget=$(command -v hget) || die "cannot find hget(1)"
+SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || SHA=
+case ${SHA:t} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
+
+exec 3< ${1:-/dev/stdin} || die "cannot read ${1:-stdin}"
+integer ok=0 bad=0
+while read -r a b <&3; do
+    case $a in (''|'#'*) continue ;; esac
+    if [[ -n $b ]]; then want=${(L)a} entry=$b; else want= entry=$a; fi
+    entry=${entry#\*} entry=${entry#./}
+    case $entry in
+        (*://*) url=$entry name=${entry:t} ;;
+        (*) if [[ -n $base ]]; then url=$base/${entry#/}; name=${entry#/}
+            else url=$entry; name=${entry:t}; fi ;;
+    esac
+    name=${name%%\?*}
+    [[ -n $name ]] || { say "no filename in $entry"; (( bad++ )); continue }
+    case /$name/ in (*/../*) say "refusing .. in path: $entry"; (( bad++ )); continue ;; esac
+    dir=${name%/*}
+    [[ $dir == "$name" ]] || mkdir -p $dir || { say "cannot create $dir"; (( bad++ )); continue }
+    $hget $url >$name || { rm -f $name; (( bad++ )); continue }
+    if [[ -n $want ]]; then
+        [[ -n $SHA ]] || { say "no sha256 tool, cannot verify $name"; rm -f $name; (( bad++ )); continue }
+        got=$(${=SHA} < $name | grep -o '[0-9a-f]\{64\}' | head -1)
+        [[ $want == "$got" ]] || { say "CHECKSUM MISMATCH for $name, removed"; rm -f $name; (( bad++ )); continue }
+        say "$name verified"
+    else
+        say "$name (unverified)"
+    fi
+    (( ok++ ))
+done
+say "$ok fetched, $bad failed"
+(( bad == 0 ))

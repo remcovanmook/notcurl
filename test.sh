@@ -1,54 +1,24 @@
 #!/usr/bin/env bash
 #
-# test.sh - self-contained test suite for hget and hexec.
+# test.sh - runs the same suite against every implementation set this host can
+# run. Needs python3 for the test servers.
 #
-# Spins up a local HTTP server on a free port, runs every case against it and
-# cleans up after itself. Needs python3 for the test server only.
-#
-#   ./test.sh              # local tests
-#   HGET_NET=1 ./test.sh   # plus tests that reach the public internet
-#   BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh
+#   ./test.sh               every set available here
+#   ./test.sh zsh bash      only those
+#   HGET_NET=1 ./test.sh    plus tests that reach the public internet
 
 set -u
 cd "${0%/*}" || exit 1
-
-SH=${BASH_UNDER_TEST:-/bin/bash}
 ROOT=$PWD
-HGET="$SH ./bash/hget"
-HEXEC="$SH ./bash/hexec"
-HWAIT="$SH $ROOT/bash/hwait"
-HMIRROR="$SH $ROOT/bash/hmirror"
+SH=${BASH_UNDER_TEST:-/bin/bash}
 
-pass=0
-fail=0
+pass=0 fail=0
+SET=
 ok()   { pass=$((pass + 1)); printf '  ok    %s\n' "$1"; }
 bad()  { fail=$((fail + 1)); printf '  FAIL  %s\n         %s\n' "$1" "$2"; }
 is()   { [ "$2" = "$3" ] && ok "$1" || bad "$1" "expected [$2] got [$3]"; }
-has()  { case $3 in *"$2"*) ok "$1" ;; *) bad "$1" "output lacks [$2]: $3" ;; esac; }
+has()  { case $3 in *"$2"*) ok "$1" ;; *) bad "$1" "output lacks [$2]: $(printf '%s' "$3" | head -c 120)" ;; esac; }
 hasnt(){ case $3 in *"$2"*) bad "$1" "output should not contain [$2]" ;; *) ok "$1" ;; esac; }
-
-# ---- fixtures ----------------------------------------------------------
-DOC=$(mktemp -d "${TMPDIR:-/tmp}/hgettest.XXXXXX") || exit 1
-trap 'kill $SRV 2>/dev/null; rm -rf "$DOC"; rm -f "${TMPDIR:-/tmp}"/hexec.*' EXIT INT TERM
-
-mkdir -p "$DOC/sub"
-printf 'sub index\n' > "$DOC/sub/index.html"
-cat > "$DOC/install.sh" <<'EOF'
-#!/usr/bin/env bash
-echo "installer ran, args: $*"
-EOF
-cat > "$DOC/py.sh" <<'EOF'
-#!/usr/bin/env python3
-import sys
-print("python ran, args:", sys.argv[1:])
-EOF
-cat > "$DOC/fail.sh" <<'EOF'
-#!/bin/sh
-echo "failing on purpose"
-exit 42
-EOF
-head -c 4096 /dev/urandom > "$DOC/binary.bin"
-printf 'b file\n' > "$DOC/b.txt"
 
 sha() {
     if   command -v sha256sum >/dev/null 2>&1; then sha256sum   < "$1" | cut -d' ' -f1
@@ -56,55 +26,29 @@ sha() {
     else openssl dgst -sha256 < "$1" | sed 's/.*= *//'
     fi
 }
+freeport() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
+
+# ---- fixtures ----------------------------------------------------------
+DOC=$(mktemp -d "${TMPDIR:-/tmp}/hgettest.XXXXXX") || exit 1
+trap 'kill $SRV $CHSRV 2>/dev/null; rm -rf "$DOC"; rm -f "${TMPDIR:-/tmp}"/hexec.*' EXIT INT TERM
+mkdir -p "$DOC/sub" "$DOC/deep/er"
+printf 'sub index\n' > "$DOC/sub/index.html"
+printf 'deep file\n' > "$DOC/deep/er/f.txt"
+printf '#!/usr/bin/env bash\necho "installer ran, args: $*"\n' > "$DOC/install.sh"
+printf '#!/bin/sh\necho failing on purpose\nexit 42\n' > "$DOC/fail.sh"
+head -c 4096 /dev/urandom > "$DOC/binary.bin"
 GOOD=$(sha "$DOC/install.sh")
+DEEP=$(sha "$DOC/deep/er/f.txt")
+BIN=$(sha "$DOC/binary.bin")
+BADH=$(printf 'd%.0s' $(seq 1 64))
 printf '%s  install.sh\n' "$GOOD" > "$DOC/install.sh.sha256"
-# Target deliberately last, to prove we match on name and not on position.
-{ printf '%s  py.sh\n' "$(sha "$DOC/py.sh")"
+{ printf '%s  binary.bin\n' "$BIN"
   printf '%s  other.tar.gz\n' "$(printf 'a%.0s' $(seq 1 64))"
-  printf '%s  install.sh\n' "$GOOD"
-} > "$DOC/SHASUMS256.txt"
-printf 'deadbeef%s  install.sh\n' "$(printf '0%.0s' $(seq 1 56))" > "$DOC/bad.sha256"
+  printf '%s  install.sh\n' "$GOOD"; } > "$DOC/SHASUMS256.txt"
 
-# ---- server ------------------------------------------------------------
-PORT=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()') || exit 1
-( cd "$DOC" && exec python3 -m http.server "$PORT" --bind 127.0.0.1 ) >/dev/null 2>&1 &
-SRV=$!
+PORT=$(freeport); ( cd "$DOC" && exec python3 -m http.server "$PORT" --bind 127.0.0.1 ) >/dev/null 2>&1 & SRV=$!
 B="http://127.0.0.1:$PORT"
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    $HGET "$B/install.sh" >/dev/null 2>&1 && break
-    sleep 0.3
-done
-
-echo "hget/hexec test suite  (shell: $($SH -c 'echo $BASH_VERSION'), port $PORT)"
-echo
-echo "hget"
-
-out=$($HGET "$B/install.sh" 2>&1);            has "fetches a file"          "installer ran" "$out"
-out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1); has "bare host:port/path works" "installer ran" "$out"
-$HGET "$B/install.sh" >"$DOC/a.sh" 2>/dev/null
-is "body goes to stdout"  "$GOOD" "$(sha "$DOC/a.sh")"
-$HGET "$B/binary.bin" >"$DOC/out.bin" 2>/dev/null
-is "body is binary-clean" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/out.bin")"
-out=$($HGET "$B/nope" 2>/dev/null); is "errors keep off stdout" "" "$out"
-out=$($HGET "$B/sub" 2>&1);                   has "redirects are followed" "sub index" "$out"
-# a server that redirects to itself, so the hop counter is the only thing stopping it
-LP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-python3 -c "
-import http.server
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(s): s.send_response(302); s.send_header('Location','/loop'); s.end_headers()
-    def log_message(*a): pass
-http.server.HTTPServer(('127.0.0.1',$LP),H).serve_forever()" & LOOPSRV=$!
-sleep 0.5
-$HGET "http://127.0.0.1:$LP/loop" >/dev/null 2>&1; is "redirect loop is bounded" "1" "$?"
-kill $LOOPSRV 2>/dev/null
-$HGET "$B/nope" >/dev/null 2>&1;              is "404 exits 1"          "1" "$?"
-$HGET >/dev/null 2>&1;                        is "no args exits 2"      "2" "$?"
-$HGET a b >/dev/null 2>&1;                    is "two args exits 2"     "2" "$?"
-$HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"   "1" "$?"
-$HGET "ftp://example.com:21/" >/dev/null 2>&1; is "bad scheme with a port too" "1" "$?"
-$HGET "http://" >/dev/null 2>&1;              is "no host exits 1"      "1" "$?"
-CHP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+CHP=$(freeport)
 python3 -c "
 import http.server
 BODY = open('$DOC/binary.bin','rb').read()
@@ -113,124 +57,103 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(s):
         s.send_response(200); s.send_header('Transfer-Encoding','chunked'); s.end_headers()
         for i in range(0, len(BODY), 997):
-            c = BODY[i:i+997]; s.wfile.write(b'%x\\r\\n' % len(c) + c + b'\\r\\n')
-        s.wfile.write(b'0\\r\\n\\r\\n')
+            c = BODY[i:i+997]; s.wfile.write(b'%x\r\n' % len(c) + c + b'\r\n')
+        s.wfile.write(b'0\r\n\r\n')
     def log_message(s, *a): pass
-http.server.HTTPServer(('127.0.0.1', $CHP), H).serve_forever()" & CHSRV=$!
-sleep 1
-$HGET "http://127.0.0.1:$CHP/x" >"$DOC/chunked.out" 2>/dev/null
-is "decodes chunked encoding" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/chunked.out" 2>/dev/null)"
-kill $CHSRV 2>/dev/null
-$HGET "$B/install.sh" 2>/dev/null | head -1 >/dev/null
-is "SIGPIPE stays quiet" "" "$($HGET "$B/install.sh" 2>&1 >/dev/null | head -1 | grep -i 'cannot write')"
-out=$(env PATH=/nonexistent $SH ./bash/hget https://example.com 2>&1); rc=$?
-has "https without openssl says so" "needs openssl" "$out"
-is  "https without openssl exits 1" "1" "$rc"
-# one-shot server that answers with a blank line where the status line belongs
-JP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-python3 -c "
-import socket
-s=socket.socket();s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
-s.bind(('127.0.0.1',$JP));s.listen(1);c,_=s.accept();c.recv(4096);c.sendall(b'\\r\\n\\r\\n');c.close()" &
-sleep 0.5
-$HGET "http://127.0.0.1:$JP/" >/dev/null 2>&1; is "malformed response exits 1" "1" "$?"
+http.server.HTTPServer(('127.0.0.1', $CHP), H).serve_forever()" >/dev/null 2>&1 & CHSRV=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do $SH "$ROOT/bash/hget" "$B/install.sh" >/dev/null 2>&1 && break; sleep 0.3; done
 
-echo
-echo "hexec"
+# ---- the suite ---------------------------------------------------------
+suite() {
+    local MD out rc saved LP2 LATE
+    printf '\n%s\n' "$SET"
 
-out=$($HEXEC "$B/install.sh" "$B/install.sh.sha256" -- --prefix=/opt 2>&1)
-has "checksum url verifies"        "sha256 verified" "$out"
-has "args pass through after --"   "args: --prefix=/opt" "$out"
-out=$($HEXEC "$B/install.sh" "$GOOD" 2>&1)
-has "bare hash verifies"           "sha256 verified" "$out"
-out=$($HEXEC "$B/install.sh" "$B/SHASUMS256.txt" 2>&1)
-has "multi-entry file, matches name" "sha256 verified" "$out"
-out=$($HEXEC "$B/install.sh" "$B/bad.sha256" 2>&1); rc=$?
-has   "mismatch is reported"       "CHECKSUM MISMATCH" "$out"
-hasnt "mismatch runs nothing"      "installer ran" "$out"
-is    "mismatch exits 1"           "1" "$rc"
-out=$($HEXEC "$B/install.sh" 2>&1)
-has "no checksum warns"            "WARNING" "$out"
-has "no checksum still runs"       "installer ran" "$out"
-out=$($HEXEC -n "$B/install.sh" "$GOOD" 2>&1); rc=$?
-hasnt "-n does not execute"        "installer ran" "$out"
-is    "-n exits 0"                 "0" "$rc"
-saved=$(printf '%s\n' "$out" | tail -1)
-is    "-n leaves the script"       "$GOOD" "$(sha "$saved" 2>/dev/null)"
-rm -f "$saved"
-$HEXEC "$B/fail.sh" >/dev/null 2>&1;          is "exit status propagates" "42" "$?"
-out=$($HEXEC "$B/py.sh" -- a b 2>&1);         has "honours the shebang"   "python ran, args: ['a', 'b']" "$out"
-$HEXEC "$B/nope.sh" >/dev/null 2>&1;          is "missing script exits 1" "1" "$?"
-$HEXEC "$B/install.sh" "$B/nope.sha256" >/dev/null 2>&1
-is "missing checksum exits 1" "1" "$?"
-$HEXEC "$B/install.sh" "not-a-valid-hash!" >/dev/null 2>&1
-is "garbage checksum exits 1" "1" "$?"
-is "temp files cleaned up" "0" "$(ls "${TMPDIR:-/tmp}"/hexec.* 2>/dev/null | wc -l | tr -d ' ')"
+    out=$($HGET "$B/install.sh" 2>&1);                   has "$SET fetches a file"        "installer ran" "$out"
+    out=$($HGET "127.0.0.1:$PORT/install.sh" 2>&1);      has "$SET bare host:port works"  "installer ran" "$out"
+    $HGET "$B/binary.bin" >"$DOC/o.bin" 2>/dev/null
+    is "$SET body is binary-clean"  "$BIN" "$(sha "$DOC/o.bin" 2>/dev/null)"
+    $HGET "http://127.0.0.1:$CHP/x" >"$DOC/c.bin" 2>/dev/null
+    is "$SET decodes chunked"       "$BIN" "$(sha "$DOC/c.bin" 2>/dev/null)"
+    out=$($HGET "$B/nope" 2>/dev/null);                  is "$SET errors keep off stdout" "" "$out"
+    out=$($HGET "$B/sub" 2>&1);                          has "$SET follows redirects"     "sub index" "$out"
+    $HGET "$B/nope" >/dev/null 2>&1;                     is "$SET 404 exits 1"            "1" "$?"
+    $HGET >/dev/null 2>&1;                               is "$SET no args exits 2"        "2" "$?"
+    $HGET "ftp://example.com:21/" >/dev/null 2>&1;       is "$SET bad scheme exits 1"     "1" "$?"
+    $HGET "http://127.0.0.1:1/" >/dev/null 2>&1;         is "$SET refused exits 1"        "1" "$?"
 
-echo
-echo "hwait"
+    out=$($HEXEC "$B/install.sh" "$B/install.sh.sha256" $SEP --prefix=/opt 2>&1)
+    has "$SET hexec verifies"        "sha256 verified" "$out"
+    has "$SET hexec passes args"     "args: --prefix=/opt" "$out"
+    out=$($HEXEC "$B/install.sh" "$GOOD" 2>&1);          has "$SET hexec bare hash"       "sha256 verified" "$out"
+    out=$($HEXEC "$B/install.sh" "$B/SHASUMS256.txt" 2>&1)
+    has "$SET hexec matches by name" "sha256 verified" "$out"
+    out=$($HEXEC "$B/install.sh" "$BADH" 2>&1); rc=$?
+    has   "$SET hexec mismatch says so" "CHECKSUM MISMATCH" "$out"
+    hasnt "$SET hexec mismatch runs nothing" "installer ran" "$out"
+    is    "$SET hexec mismatch exits 1" "1" "$rc"
+    out=$($HEXEC "$B/install.sh" 2>&1);                  has "$SET hexec warns unverified" "WARNING" "$out"
+    out=$($HEXEC -n "$B/install.sh" "$GOOD" 2>&1); rc=$?
+    hasnt "$SET hexec -n does not run" "installer ran" "$out"
+    is    "$SET hexec -n exits 0"      "0" "$rc"
+    saved=$(printf '%s\n' "$out" | tail -1)
+    is    "$SET hexec -n leaves file"  "$GOOD" "$(sha "$saved" 2>/dev/null)"; rm -f "$saved"
+    $HEXEC "$B/fail.sh" >/dev/null 2>&1;                 is "$SET hexec propagates status" "42" "$?"
+    $HEXEC "$B/nope.sh" >/dev/null 2>&1;                 is "$SET hexec missing exits 1"   "1" "$?"
 
-$HWAIT "$B/" 5 >/dev/null 2>&1;                 is "healthy url exits 0"    "0" "$?"
-$HWAIT "http://127.0.0.1:1/" 2 >/dev/null 2>&1; is "dead port times out"    "1" "$?"
-$HWAIT "$B/nope" 2 >/dev/null 2>&1;             is "404 is not healthy"     "1" "$?"
-$HWAIT >/dev/null 2>&1;                         is "no args exits 2"        "2" "$?"
-$HWAIT "$B/" abc >/dev/null 2>&1;               is "bad timeout exits 1"    "1" "$?"
-LP2=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
-( sleep 2; cd "$DOC" && exec python3 -m http.server "$LP2" --bind 127.0.0.1 ) >/dev/null 2>&1 &
-LATE=$!
-$HWAIT "http://127.0.0.1:$LP2/" 20 >/dev/null 2>&1; is "waits for a late server" "0" "$?"
-kill $LATE 2>/dev/null; pkill -f "http.server $LP2" 2>/dev/null
+    $HWAIT "$B/" 5 >/dev/null 2>&1;                      is "$SET hwait healthy exits 0"   "0" "$?"
+    $HWAIT "http://127.0.0.1:1/" 2 >/dev/null 2>&1;      is "$SET hwait times out"         "1" "$?"
+    $HWAIT "$B/nope" 2 >/dev/null 2>&1;                  is "$SET hwait 404 not ready"     "1" "$?"
+    $HWAIT >/dev/null 2>&1;                              is "$SET hwait no args exits 2"   "2" "$?"
+    LP2=$(freeport)
+    ( sleep 2; cd "$DOC" && exec python3 -m http.server "$LP2" --bind 127.0.0.1 ) >/dev/null 2>&1 & LATE=$!
+    $HWAIT "http://127.0.0.1:$LP2/" 20 >/dev/null 2>&1;  is "$SET hwait waits for a late server" "0" "$?"
+    kill $LATE 2>/dev/null
 
-echo
-echo "hmirror"
+    MD=$DOC/mirror.$SET; mkdir -p "$MD"
+    ( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR ) >/dev/null 2>&1
+    is "$SET hmirror stdin"          "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+    rm -f "$MD/install.sh"
+    ( cd "$MD" && printf '%s  *install.sh\n' "$GOOD" | $HMIRROR "$B/" ) >/dev/null 2>&1
+    is "$SET hmirror baseurl and *"  "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
+    ( cd "$MD" && printf '%s  deep/er/f.txt\n' "$DEEP" | $HMIRROR "$B" ) >/dev/null 2>&1
+    is "$SET hmirror keeps subdirs"  "$DEEP" "$(sha "$MD/deep/er/f.txt" 2>/dev/null)"
+    ( cd "$MD" && printf '%s  install.sh\n' "$BADH" | $HMIRROR "$B/" ) >/dev/null 2>&1
+    is "$SET hmirror mismatch exits 1" "1" "$?"
+    is "$SET hmirror mismatch removes" "" "$(ls "$MD/install.sh" 2>/dev/null)"
+    ( cd "$MD" && printf '../esc.txt\n' | $HMIRROR "$B/" ) >/dev/null 2>&1
+    is "$SET hmirror refuses .."     "1" "$?"
+    is "$SET hmirror nothing escaped" "" "$(ls "$DOC/esc.txt" 2>/dev/null)"
+    ( cd "$MD" && printf '# comment\n\n%s\n' "$B/install.sh" | $HMIRROR ) >/dev/null 2>&1
+    is "$SET hmirror skips comments" "0" "$?"
 
-MD=$DOC/mirror; mkdir -p "$MD"
-( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR ) >/dev/null 2>&1
-is "reads urls from stdin"     "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
-( cd "$MD" && printf '%s  %s\n' "$GOOD" "$B/install.sh" > m1 && $HMIRROR m1 ) >/dev/null 2>&1
-is "verifies a hashed line"    "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
-( cd "$MD" && printf '%s\n' "$B/binary.bin" | $HMIRROR ) >/dev/null 2>&1
-is "binary is intact"          "$(sha "$DOC/binary.bin")" "$(sha "$MD/binary.bin" 2>/dev/null)"
-BADH=$(printf 'd%.0s' $(seq 1 64))
-( cd "$MD" && printf '%s  %s\n' "$BADH" "$B/install.sh" > m2 && $HMIRROR m2 ) >/dev/null 2>&1
-is "mismatch exits 1"          "1" "$?"
-is "mismatch removes the file" "" "$(ls "$MD/install.sh" 2>/dev/null)"
-( cd "$MD" && printf '# comment\n\n%s\n' "$B/b.txt" | $HMIRROR ) >/dev/null 2>&1
-is "skips blanks and comments" "0" "$?"
-( cd "$MD" && printf '%s\n' "$B/nope.txt" | $HMIRROR ) >/dev/null 2>&1
-is "a 404 line fails the run"  "1" "$?"
-rm -f "$MD/install.sh"
-( cd "$MD" && printf '%s  install.sh\n' "$GOOD" | $HMIRROR "$B" ) >/dev/null 2>&1
-is "baseurl resolves a bare name"   "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
-rm -f "$MD/install.sh"
-( cd "$MD" && printf '%s  *install.sh\n' "$GOOD" | $HMIRROR "$B/" ) >/dev/null 2>&1
-is "trailing slash and * marker ok" "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
-rm -f "$MD/install.sh"
-( cd "$MD" && printf '%s\n' "$B/install.sh" | $HMIRROR "$B/nowhere/" ) >/dev/null 2>&1
-is "absolute entry ignores base"    "$GOOD" "$(sha "$MD/install.sh" 2>/dev/null)"
-$HMIRROR a b c >/dev/null 2>&1;     is "too many args exits 2" "2" "$?"
-mkdir -p "$DOC/sub2/deep" && printf 'deep file\n' > "$DOC/sub2/deep/f.txt"
-DEEP=$(sha "$DOC/sub2/deep/f.txt")
-( cd "$MD" && printf 'sub2/deep/f.txt\n' | $HMIRROR "$B/" ) >/dev/null 2>&1
-is "baseurl preserves subdirs"      "$DEEP" "$(sha "$MD/sub2/deep/f.txt" 2>/dev/null)"
-( cd "$MD" && printf '%s\n' "$B/sub2/deep/f.txt" | $HMIRROR ) >/dev/null 2>&1
-is "absolute url stays flat"        "$DEEP" "$(sha "$MD/f.txt" 2>/dev/null)"
-for bad in '../esc.txt' 'a/../../esc.txt' '..'; do
-    ( cd "$MD" && printf '%s\n' "$bad" | $HMIRROR "$B/" ) >/dev/null 2>&1
-    is "refuses traversal: $bad"    "1" "$?"
-done
-is "nothing escaped the directory"  "" "$(ls "$DOC/esc.txt" 2>/dev/null)"
+    if [ "${HGET_NET:-0}" = "1" ]; then
+        out=$($HGET https://example.com 2>&1);           has "$SET https works" "Example Domain" "$out"
+        $HGET https://expired.badssl.com/ >/dev/null 2>&1
+        is "$SET expired cert refused" "1" "$?"
+    fi
+}
 
-if [ "${HGET_NET:-0}" = "1" ]; then
-    echo
-    echo "network"
-    out=$($HGET https://example.com 2>&1);    has "https works"        "Example Domain" "$out"
-    out=$($HGET https://expired.badssl.com/ 2>&1); rc=$?
-    is  "expired cert is refused"   "1" "$rc"
-    has "and says why, with no -v"  "certificate has expired" "$out"
-    out=$($HGET http://github.com 2>&1);      has "http->https redirect" "<!DOCTYPE html>" "$out"
+WANT=${*:-}
+have() { case " $WANT " in *" $1 "*) return 0 ;; esac; [ -z "$WANT" ]; }
+
+if have bash; then
+    SET=bash SEP=-- HGET="$SH $ROOT/bash/hget" HEXEC="$SH $ROOT/bash/hexec" \
+        HWAIT="$SH $ROOT/bash/hwait" HMIRROR="$SH $ROOT/bash/hmirror"; suite
+fi
+if have zsh && command -v zsh >/dev/null 2>&1; then
+    SET=zsh SEP=-- HGET="zsh $ROOT/zsh/hget" HEXEC="zsh $ROOT/zsh/hexec" \
+        HWAIT="zsh $ROOT/zsh/hwait" HMIRROR="zsh $ROOT/zsh/hmirror"; suite
+fi
+if have ash && command -v nc >/dev/null 2>&1 && nc --help 2>&1 | grep -q -- '-e PROG'; then
+    SET=ash SEP=-- HGET="sh $ROOT/ash/hget" HEXEC="sh $ROOT/ash/hexec" \
+        HWAIT="sh $ROOT/ash/hwait" HMIRROR="sh $ROOT/ash/hmirror"; suite
+fi
+if have powershell && command -v pwsh >/dev/null 2>&1; then
+    SET=powershell SEP= HGET="pwsh -NoProfile -File $ROOT/powershell/hget.ps1" \
+        HEXEC="pwsh -NoProfile -File $ROOT/powershell/hexec.ps1" \
+        HWAIT="pwsh -NoProfile -File $ROOT/powershell/hwait.ps1" \
+        HMIRROR="pwsh -NoProfile -File $ROOT/powershell/hmirror.ps1"; suite
 fi
 
-echo
-printf '%d passed, %d failed\n' "$pass" "$fail"
+printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
