@@ -1,0 +1,55 @@
+#!/usr/bin/env zsh
+USAGE='usage: hwait <url> [timeout]
+
+Polls until the url answers 2xx, then exits 0. Default timeout 60 seconds.'
+
+emulate -L zsh
+setopt nounset
+zmodload zsh/net/tcp
+
+say() { print -u2 -r -- "hwait: $*" }
+die() { say "$@"; exit 1 }
+req() { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hwait\r\nAccept: */*\r\n\r\n' "$upath" "$hostport" }
+
+(( $# >= 1 && $# <= 2 )) || { print -u2 -r -- "$USAGE"; exit 2 }
+url=$1 timeout=${2:-60}
+[[ $timeout == <-> ]] || die "timeout must be a whole number of seconds: $timeout"
+
+rest=${url#*://} scheme=http
+[[ $rest != "$url" ]] && scheme=${url%%://*}
+hostport=${rest%%/*} upath=/
+[[ ${rest#*/} != "$rest" ]] && upath=/${rest#*/}
+host=${hostport%%:*} port=${hostport##*:}
+[[ $port == "$hostport" ]] && port=
+case $scheme in
+    http)  port=${port:-80} ;;
+    https) port=${port:-443} ;;
+    *) die "unsupported scheme: $scheme" ;;
+esac
+[[ -n $host ]] || die "no host in url: $url"
+if [[ $scheme == https ]]; then
+    ssl=$(command -v openssl) || ssl=
+    [[ -n $ssl && -x $ssl ]] || die "https needs openssl(1)"
+fi
+
+probe() {
+    local proto code reason
+    if [[ $scheme == http ]]; then
+        ztcp $host $port 2>/dev/null || return 1
+        exec 5<&$REPLY
+        ztcp -c $REPLY
+        req >&5
+    else
+        exec 5< <(req | $ssl s_client -quiet -verify_return_error -servername $host -connect $host:$port 2>/dev/null)
+    fi
+    read -t 10 -r proto code reason <&5 2>/dev/null
+    exec 5<&-
+    [[ ${code:-} == 2* ]]
+}
+
+SECONDS=0
+while :; do
+    probe && exit 0
+    (( SECONDS < timeout )) || die "gave up on $url after ${timeout}s"
+    sleep 1
+done

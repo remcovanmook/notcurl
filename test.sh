@@ -14,10 +14,10 @@ cd "${0%/*}" || exit 1
 
 SH=${BASH_UNDER_TEST:-/bin/bash}
 ROOT=$PWD
-HGET="$SH ./hget"
-HEXEC="$SH ./hexec"
-HWAIT="$SH $ROOT/hwait"
-HMIRROR="$SH $ROOT/hmirror"
+HGET="$SH ./bash/hget"
+HEXEC="$SH ./bash/hexec"
+HWAIT="$SH $ROOT/bash/hwait"
+HMIRROR="$SH $ROOT/bash/hmirror"
 
 pass=0
 fail=0
@@ -104,9 +104,26 @@ $HGET a b >/dev/null 2>&1;                    is "two args exits 2"     "2" "$?"
 $HGET "ftp://example.com/" >/dev/null 2>&1;   is "bad scheme exits 1"   "1" "$?"
 $HGET "ftp://example.com:21/" >/dev/null 2>&1; is "bad scheme with a port too" "1" "$?"
 $HGET "http://" >/dev/null 2>&1;              is "no host exits 1"      "1" "$?"
+CHP=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+python3 -c "
+import http.server
+BODY = open('$DOC/binary.bin','rb').read()
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    def do_GET(s):
+        s.send_response(200); s.send_header('Transfer-Encoding','chunked'); s.end_headers()
+        for i in range(0, len(BODY), 997):
+            c = BODY[i:i+997]; s.wfile.write(b'%x\\r\\n' % len(c) + c + b'\\r\\n')
+        s.wfile.write(b'0\\r\\n\\r\\n')
+    def log_message(s, *a): pass
+http.server.HTTPServer(('127.0.0.1', $CHP), H).serve_forever()" & CHSRV=$!
+sleep 1
+$HGET "http://127.0.0.1:$CHP/x" >"$DOC/chunked.out" 2>/dev/null
+is "decodes chunked encoding" "$(sha "$DOC/binary.bin")" "$(sha "$DOC/chunked.out" 2>/dev/null)"
+kill $CHSRV 2>/dev/null
 $HGET "$B/install.sh" 2>/dev/null | head -1 >/dev/null
 is "SIGPIPE stays quiet" "" "$($HGET "$B/install.sh" 2>&1 >/dev/null | head -1 | grep -i 'cannot write')"
-out=$(env PATH=/nonexistent $SH ./hget https://example.com 2>&1); rc=$?
+out=$(env PATH=/nonexistent $SH ./bash/hget https://example.com 2>&1); rc=$?
 has "https without openssl says so" "needs openssl" "$out"
 is  "https without openssl exits 1" "1" "$rc"
 # one-shot server that answers with a blank line where the status line belongs

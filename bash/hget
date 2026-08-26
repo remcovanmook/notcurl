@@ -31,10 +31,11 @@ get() {
         exec 5< <(req | "$ssl" s_client -quiet -verify_return_error -servername "$host" -connect "$host:$port" 2>"$err")
     fi
     read -r proto code reason <&5 && [ -n "$code" ] || { grep -E 'verify error|:error:' "${err:-/dev/null}" >&2; die "no usable response from $host:$port"; }
-    reason=${reason%$'\r'} loc=
+    reason=${reason%$'\r'} loc= chunked=
     shopt -s nocasematch
     while IFS= read -r h <&5 && h=${h%$'\r'} && [ -n "$h" ]; do
         [[ $h == location:* ]] && read -r loc <<<"${h#*:}"
+        [[ $h == transfer-encoding:*chunked* ]] && chunked=1
     done
     shopt -u nocasematch
 }
@@ -56,4 +57,11 @@ while :; do
 done
 
 [[ $code == 2* ]] || die "$url returned $code $reason"
-cat <&5
+[ -n "$chunked" ] || { cat <&5; exit; }
+while IFS= read -r n <&5; do
+    n=${n%$'\r'} n=${n%%;*}
+    case $n in ''|*[!0-9A-Fa-f]*) die "bad chunk header from $url" ;; esac
+    [ $((16#$n)) -gt 0 ] || break
+    dd bs=1 count=$((16#$n)) <&5 2>/dev/null
+    IFS= read -r n <&5
+done

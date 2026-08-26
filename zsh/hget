@@ -1,0 +1,76 @@
+#!/usr/bin/env zsh
+USAGE='usage: hget <url>'
+
+emulate -L zsh
+setopt nounset
+zmodload zsh/net/tcp
+
+say()   { print -u2 -r -- "hget: $*" }
+die()   { say "$@"; exit 1 }
+usage() { print -u2 -r -- "$USAGE"; exit 2 }
+req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$upath" "$hostport" }
+
+parse() {
+    local u=$1 rest
+    rest=${u#*://} scheme=http
+    [[ $rest != "$u" ]] && scheme=${u%%://*}
+    hostport=${rest%%/*} upath=/
+    [[ ${rest#*/} != "$rest" ]] && upath=/${rest#*/}
+    host=${hostport%%:*} port=${hostport##*:}
+    [[ $port == "$hostport" ]] && port=
+    case $scheme in
+        http)  port=${port:-80} ;;
+        https) port=${port:-443} ;;
+        *) die "unsupported scheme: $scheme" ;;
+    esac
+    [[ -n $host ]] || die "no host in url: $u"
+}
+
+get() {
+    local proto h
+    parse "$1"
+    if [[ $scheme == http ]]; then
+        ztcp $host $port 2>/dev/null || die "cannot connect to $host:$port"
+        exec 5<&$REPLY
+        ztcp -c $REPLY
+        req >&5
+    else
+        ssl=$(command -v openssl) || ssl=
+        [[ -n $ssl && -x $ssl ]] || die "https needs openssl(1)"
+        [[ -n $err ]] || { err=$(mktemp "${TMPDIR:-/tmp}/hget.XXXXXX") || die "cannot create temp file" }
+        exec 5< <(req | $ssl s_client -quiet -verify_return_error -servername $host -connect $host:$port 2>$err)
+    fi
+    read -r proto code reason <&5 && [[ -n $code ]] || { grep -E 'verify error|:error:' ${err:-/dev/null} >&2; die "no usable response from $host:$port" }
+    reason=${reason%$'\r'} loc= chunked=
+    while IFS= read -r h <&5 && h=${h%$'\r'} && [[ -n $h ]]; do
+        [[ ${(L)h} == location:* ]] && read -r loc <<< "${h#*:}"
+        [[ ${(L)h} == transfer-encoding:*chunked* ]] && chunked=1
+    done
+}
+
+(( $# == 1 )) || usage
+url=$1 err=
+trap '[[ -n $err ]] && rm -f $err' EXIT INT TERM
+integer hop=0
+
+while :; do
+    get $url
+    [[ -n $loc && $code == 30[12378] ]] || break
+    (( ++hop <= 5 )) || die "more than 5 redirects"
+    case $loc in
+        *://*) url=$loc ;;
+        /*)    url=$scheme://$hostport$loc ;;
+        *)     url=$scheme://$hostport${upath%/*}/$loc ;;
+    esac
+    exec 5<&-
+done
+
+[[ $code == 2* ]] || die "$url returned $code $reason"
+[[ -n $chunked ]] || { cat <&5; exit }
+while IFS= read -r n <&5; do
+    n=${n%$'\r'} n=${n%%;*}
+    case $n in (''|*[!0-9A-Fa-f]*) die "bad chunk header from $url" ;; esac
+    (( 16#$n > 0 )) || break
+    dd bs=1 count=$((16#$n)) <&5 2>/dev/null
+    IFS= read -r n <&5
+done
