@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl
 # hget - fetch a url to stdout
 #

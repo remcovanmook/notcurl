@@ -261,6 +261,11 @@ engines.** `make test` carries a subset permanently.
   eval "$(awk '/^# SHELL$/,/^# ENDSHELL$/' "$0")"
   ```
 
+- The shebang is `#!/usr/bin/env bash`, matching the rest of the repo. `#!/bin/bash`
+  would pin the wrong interpreter or none at all: there is no `/bin/bash` on the
+  BSDs (bash installs to `/usr/local/bin`) or on NixOS, and on macOS it selects
+  the 3.2 that ships with the system rather than whatever is on `PATH`. Windows
+  ignores the line entirely — the `.ps1` extension is what dispatches there.
 - The shell program must not contain `#>`, which would close the PowerShell block
   comment early. Nothing in the sets does; worth knowing before editing one.
 - Generated, not hand-written. Edit the sets and run `make portable`; edits made
