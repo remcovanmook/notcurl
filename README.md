@@ -51,8 +51,8 @@ To PowerShell, `${...}` delimits a variable name. The entire
 error, execution continues.
 
 One line, two unrelated readings, and no external command anywhere in it,
-which is why it still works on Windows, where the `true` and `test` binaries
-that make lesser polyglots look correct do not exist.
+which is why it works on Windows, where there is no `true` and no `test`
+binary to lean on.
 
 The bash implementation sits verbatim inside a `<# ... #>` block, which
 PowerShell reads as one comment and bash is handed by line range. The

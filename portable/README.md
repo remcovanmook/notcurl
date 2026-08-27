@@ -91,17 +91,10 @@ entire `true:-choose "$@"` is read as the name of one undefined variable, which
 evaluates to `$null`. A statement whose value is `$null` emits nothing. No
 output, no error, execution continues to the next line.
 
-The arguments must sit **inside** the braces. Outside they are a PowerShell parse
-error, and the naked form emits the function name onto stdout:
-
-| dispatch | bash | PowerShell |
-|----------|------|------------|
-| `"choose$true"` | calls `choose` ✓ | prints `chooseTrue` to **stdout** ✗ |
-| `${true:-choose} "$@"` | calls with args ✓ | ParserError ✗ |
-| `${true:-choose "$@"}` | calls with args ✓ | silent `$null` ✓ |
-
-Stray stdout is not cosmetic here: `hget` writes the response body to stdout, so
-one extra line corrupts every download.
+The arguments sit **inside** the braces, which is load-bearing in both
+directions: outside them PowerShell has a parse error, and any form that
+evaluates to a string rather than `$null` prints it. `hget` writes the response
+body to stdout, so a single stray line corrupts every download.
 
 ### 2. The bash program sits in a PowerShell block comment
 

@@ -20,8 +20,8 @@ say()   { print -u2 -r -- "hexec: $*" }
 die()   { say "$@"; exit 1 }
 usage() { print -u2 -r -- "$USAGE"; exit 2 }
 
-# Options by hand rather than getopts, which eats the "--" and would leave
-# "hexec -- --prefix=/opt" treating --prefix=/opt as the url.
+# Parsed by hand so the "--" survives to the lines below: with no url given,
+# "hexec -- --prefix=/opt" passes --prefix=/opt to the script. getopts consumes it.
 while (( $# > 0 )); do
     case $1 in
         (-n) dry=1; shift ;;
