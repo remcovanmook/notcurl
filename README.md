@@ -22,8 +22,8 @@ Linux, macOS and BSD and as a PowerShell script on Windows, unmodified, and
 fetches, verifies and runs your installer on all of them: fetch fully, check
 against a SHA-256 you publish, then execute, with no other tool present.
 Containers and embedded systems get the same behaviour from the `ash` set,
-which needs nothing beyond busybox. One 14 kB file — four implementations,
-two languages — launches your installer on any modern platform, and your users
+which needs nothing beyond busybox. One 14 kB file, four implementations,
+two languages, launches your installer on any modern platform, and your users
 can read every line before anything runs.
 
 ## One file, two languages
@@ -320,12 +320,10 @@ make check              # also the tests that reach the internet
 BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh bash
 ```
 
-The harness detects which sets the host can run and skips the rest: 36 tests
-per set, plus 12 for each engine that can run the portable files, so 132 on a
+The harness detects which sets the host can run and skips the rest: 38 tests
+per set, plus 12 for each engine that can run the portable files, so 138 on a
 host with bash, zsh, pwsh and the polyglots. bash, zsh and powershell pass on
-macOS; ash passes on Alpine, where the harness itself cannot run, because
-Alpine has neither bash nor python3, so that set is driven against fixtures
-served from another host.
+macOS; ash passes on Alpine.
 
 ---
 
