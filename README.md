@@ -69,9 +69,9 @@ the generated files rather than `make install SET=portable`; `hwait` and
 since all they need is a program by that name.
 
 **[portable/README.md](portable/README.md) is the full walkthrough**: why
-APE's positional-header trick does not transfer to two whole-file parsers, the
-table of seams that look like they should work and don't, and why zsh and
-busybox ash cannot run it.
+APE's positional-header trick does not transfer to two whole-file parsers, how
+the two halves stay out of each other's parser, and why zsh and busybox ash
+cannot run it.
 
 ---
 

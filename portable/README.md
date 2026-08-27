@@ -62,19 +62,6 @@ executing a single line — so a syntax error at the bottom stops the top from
 running. There is no offset to hide in. Anything the other language must not see
 has to be inside a comment or a string *of the language that is reading it*.
 
-That looks closed, because the obvious seams are all one-sided:
-
-| construct | PowerShell | bash |
-|-----------|------------|------|
-| `# <#` | `#` line comment wins; no block comment opens | comment ✓ |
-| bare `<#` | opens a block comment ✓ | syntax error |
-| `: <<'#>'` | `<` is a reserved redirection operator | heredoc ✓ |
-| `$null=@'` | here-string ✓ | unterminated quote |
-| `true`, `test -z "$x"` | works — but only by finding the **Unix binary** | ✓ |
-
-The last row is the trap: it looks like a polyglot and fails on Windows, which is
-the only platform it was added for.
-
 ## The trick: `$true`
 
 `$true` is a PowerShell automatic variable holding boolean true, which
