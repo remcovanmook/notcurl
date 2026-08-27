@@ -181,7 +181,7 @@ portable_suite() {
 }
 
 if have portable && [ -f "$ROOT/portable/hget.ps1" ]; then
-    SET="portable (sh)" PSEP=-- PHGET="$SH $ROOT/portable/hget.ps1" \
+    SET="portable (bash)" PSEP=-- PHGET="$SH $ROOT/portable/hget.ps1" \
         PHEXEC="$SH $ROOT/portable/hexec.ps1"; portable_suite
 fi
 if have portable && command -v pwsh >/dev/null 2>&1 && [ -f "$ROOT/portable/hget.ps1" ]; then

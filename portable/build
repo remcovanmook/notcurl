@@ -7,11 +7,11 @@
 #
 # The layout of a generated file:
 #
-#   function choose { ... }     parses as PowerShell, only ever runs under sh
-#   ${true:-choose "$@"}        sh: calls choose.  pwsh: $null, emits nothing
-#   <# ... #>                   sh has exited; PowerShell reads a block comment
-#     the shell program           - plain, unprefixed, extracted by choose
-#   PowerShell definitions      sh never parses this far
+#   function choose { ... }     parses as PowerShell, only ever runs under bash
+#   ${true:-choose "$@"}        bash: calls choose.  pwsh: $null, emits nothing
+#   <# ... #>                   bash has exited; PowerShell reads a comment
+#     the bash program            - plain, unprefixed, extracted by choose
+#   PowerShell definitions      bash never parses this far
 #   & "choose$true" @args       pwsh entry point
 set -e
 cd "${0%/*}/.."

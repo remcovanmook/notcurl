@@ -1,6 +1,6 @@
 # portable
 
-Files that are a shell script on Unix and a PowerShell script on Windows at the
+Files that are a bash script on Unix and a PowerShell script on Windows at the
 same time.
 
 ```bash
@@ -56,20 +56,33 @@ DOS/PE loader reads the `MZ` header at offset 0, the ELF loader reads its magic
 at offset 0, and a shell reads the file as text. Each one takes its slice and
 never objects to the rest.
 
-Two script languages give you no such slack. `sh` and PowerShell both consume
+Two script languages give you no such slack. bash and PowerShell both consume
 the whole file as text, and PowerShell parses **all** of it into an AST before
 executing a single line — so a syntax error at the bottom stops the top from
 running. There is no offset to hide in. Anything the other language must not see
 has to be inside a comment or a string *of the language that is reading it*.
 
+That looks closed, because the obvious seams are all one-sided:
+
+| construct | PowerShell | bash |
+|-----------|------------|------|
+| `# <#` | `#` line comment wins; no block comment opens | comment ✓ |
+| bare `<#` | opens a block comment ✓ | syntax error |
+| `: <<'#>'` | `<` is a reserved redirection operator | heredoc ✓ |
+| `$null=@'` | here-string ✓ | unterminated quote |
+| `true`, `test -z "$x"` | works — but only by finding the **Unix binary** | ✓ |
+
+The last row is the trap: it looks like a polyglot and fails on Windows, which is
+the only platform it was added for.
+
 ## The trick: `$true`
 
 `$true` is a PowerShell automatic variable holding boolean true, which
-interpolates into a string as `True`. To `sh` it is an unset variable that
+interpolates into a string as `True`. To bash it is an unset variable that
 expands to nothing. So one token reads as two different names:
 
 ```
-"choose$true"   ->  sh: "choose"        pwsh: "chooseTrue"
+"choose$true"   ->  bash: "choose"       pwsh: "chooseTrue"
 ```
 
 No external command, no filesystem, nothing platform-specific — which is exactly
@@ -86,7 +99,7 @@ is built on that one difference.
 ${true:-choose "$@"}
 ```
 
-**sh** — `true` is unset, so `${var:-default}` yields the default: the words
+**bash** — `true` is unset, so `${var:-default}` yields the default: the words
 `choose "$@"`. The expansion is unquoted, so it word-splits into a command and
 its arguments, and bash calls the function `choose` with the script's arguments.
 
@@ -98,8 +111,8 @@ output, no error, execution continues to the next line.
 The arguments must sit **inside** the braces. Outside they are a PowerShell parse
 error, and the naked form emits the function name onto stdout:
 
-| dispatch | sh | PowerShell |
-|----------|-----|------------|
+| dispatch | bash | PowerShell |
+|----------|------|------------|
 | `"choose$true"` | calls `choose` ✓ | prints `chooseTrue` to **stdout** ✗ |
 | `${true:-choose} "$@"` | calls with args ✓ | ParserError ✗ |
 | `${true:-choose "$@"}` | calls with args ✓ | silent `$null` ✓ |
@@ -107,7 +120,7 @@ error, and the naked form emits the function name onto stdout:
 Stray stdout is not cosmetic here: `hget` writes the response body to stdout, so
 one extra line corrupts every download.
 
-### 2. The shell program sits in a PowerShell block comment
+### 2. The bash program sits in a PowerShell block comment
 
 PowerShell parses function bodies too, so it is not enough for a function to go
 uncalled — its contents must still *parse* as PowerShell. Real shell does not:
@@ -118,13 +131,13 @@ say()   { printf 'hget: %s\n' "$*" >&2; }
         An expression was expected after '('.
 ```
 
-So the shell program is wrapped in `<# ... #>`, where PowerShell sees one long
-comment. It stays **plain, unindented, unprefixed shell** — readable, and
+So the bash program is wrapped in `<# ... #>`, where PowerShell sees one long
+comment. It stays **plain, unindented, unprefixed bash** — readable, and
 diffable against the file it came from.
 
-A bare `<#` is a syntax error to a shell, which looks fatal until you notice the
-shell never gets there: it has already exited at the dispatch line above. All the
-shell needs is to be *handed* the text, which `choose` does by line range:
+A bare `<#` is a syntax error to bash, which looks fatal until you notice that
+bash never gets there: it has already exited at the dispatch line above. All bash
+needs is to be *handed* the text, which `choose` does by line range:
 
 ```sh
 function choose
@@ -138,25 +151,29 @@ That body is valid PowerShell syntax — a command, a string with a subexpressio
 and `exit` — which is all that matters, because PowerShell never calls it.
 
 The trailing `exit` is a guard. If the payload failed to eval, `choose` would
-return and the shell would carry on into the PowerShell section and print a wall
-of syntax errors. `exit` makes the shell side stop no matter what.
+return and bash would carry on into the PowerShell section and print a wall of
+syntax errors. `exit` makes the bash side stop no matter what.
 
-### 3. Ordering keeps the shell out of the PowerShell
+### 3. Ordering keeps the PowerShell away from bash
 
-The reverse problem — PowerShell code that `sh` must not parse — needs no trick,
-only sequence. `sh` parses one command at a time and executes as it goes, so
+The reverse problem — PowerShell code that bash must not parse — needs no trick,
+only sequence. bash parses one command at a time and executes as it goes, so
 anything after a command that exits is never read. The layout is therefore:
 
 ```
-function choose { ... }          both parse this
-#| ...shell implementation...    pwsh: comments      sh: comments, eval'd later
-${true:-choose "$@"}             sh: runs, exits     pwsh: $null, continues
-function choosetrue { ... }      sh: NEVER PARSED    pwsh: the real implementation
-& "choose$true" @args            sh: NEVER PARSED    pwsh: calls it
+function choose { ... }      both parse this
+${true:-choose "$@"}         bash: runs it, exits    pwsh: $null, continues
+<#                           bash: NEVER PARSED      pwsh: opens a comment
+  ...the bash program...     bash: eval'd by choose  pwsh: inside the comment
+#>                           bash: NEVER PARSED      pwsh: closes it
+function choosetrue { ... }  bash: NEVER PARSED      pwsh: the implementation
+& "choose$true" @args        bash: NEVER PARSED      pwsh: calls it
 ```
 
 Below the dispatch the file can be pure PowerShell, including `param()` blocks
-and `[System.Net.Sockets.TcpClient]`, because no shell ever reads that far.
+and `[System.Net.Sockets.TcpClient]`, because bash never reads that far. It is
+also why a bare `<#` is safe despite being a bash syntax error: bash left at the
+line above.
 
 ### 4. The PowerShell call
 
@@ -178,8 +195,8 @@ chunked decoding, redirects, 404 exit status, clean stdout on error, usage exit
 
 | engine | result |
 |--------|--------|
-| `./hget` (shebang → bash) | 7/7 |
-| `pwsh ./hget` | 7/7 |
+| `./hget.ps1` (shebang → bash) | 7/7 |
+| `pwsh -NoProfile -File hget.ps1` | 7/7 |
 
 So "portable across effectively everything" means bash and PowerShell, which
 between them cover macOS, most Linux, the BSDs and Windows. The other three sets
@@ -266,7 +283,7 @@ engines.** `make test` carries a subset permanently.
   BSDs (bash installs to `/usr/local/bin`) or on NixOS, and on macOS it selects
   the 3.2 that ships with the system rather than whatever is on `PATH`. Windows
   ignores the line entirely — the `.ps1` extension is what dispatches there.
-- The shell program must not contain `#>`, which would close the PowerShell block
+- The bash program must not contain `#>`, which would close the PowerShell block
   comment early. Nothing in the sets does; worth knowing before editing one.
 - Generated, not hand-written. Edit the sets and run `make portable`; edits made
   directly to these files are lost. Nothing is rewritten on the way through —
