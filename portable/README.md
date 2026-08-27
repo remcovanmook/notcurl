@@ -118,9 +118,9 @@ So the bash program is wrapped in `<# ... #>`, where PowerShell sees one long
 comment. It stays **plain, unindented, unprefixed bash** — readable, and
 diffable against the file it came from.
 
-A bare `<#` is a syntax error to bash, which looks fatal until you notice that
-bash never gets there: it has already exited at the dispatch line above. All bash
-needs is to be *handed* the text, which `choose` does by line range:
+A bare `<#` is a bash syntax error, but bash never reaches it, having exited at
+the dispatch line above. All bash needs is to be *handed* the text, which
+`choose` does by line range:
 
 ```sh
 function choose
@@ -152,10 +152,8 @@ ${true:-choose "$@"}       bash: runs it, exits    pwsh: $null, continues
 ...ordinary PowerShell...  bash: NEVER PARSED      pwsh: just runs it
 ```
 
-Below the dispatch the file can be pure PowerShell, including `param()` blocks
-and `[System.Net.Sockets.TcpClient]`, because bash never reads that far. It is
-also why a bare `<#` is safe despite being a bash syntax error: bash left at the
-line above.
+Below the dispatch the file is ordinary PowerShell — `[System.Net.Sockets.TcpClient]`
+and all — because bash never reads that far.
 
 ### 4. Nothing below the dispatch has to humour bash
 
@@ -166,9 +164,7 @@ above applied to it. `hget.ps1` ends on a plain call:
 Invoke-Hget @args
 ```
 
-There is no second use of the `$true` seam and no call operator on a computed
-name. Both would work, and both were there at first; neither earns its place
-once you notice that bash stopped reading several lines earlier.
+The seam appears exactly once in each file, on the dispatch line.
 
 The one exception is a `param()` block, which PowerShell requires to be the
 first statement of its scope — and at the top level of these files the dispatch
