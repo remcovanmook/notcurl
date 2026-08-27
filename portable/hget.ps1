@@ -192,8 +192,4 @@ function Invoke-Hget {
 }
 # <<< hget
 
-function choosetrue
-{
 Invoke-Hget @args
-}
-& "choose$true" @args

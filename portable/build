@@ -11,8 +11,8 @@
 #   ${true:-choose "$@"}        bash: calls choose.  pwsh: $null, emits nothing
 #   <# ... #>                   bash has exited; PowerShell reads a comment
 #     the bash program            - plain, unprefixed, extracted by choose
-#   PowerShell definitions      bash never parses this far
-#   & "choose$true" @args       pwsh entry point
+#   ordinary PowerShell          bash never parses this far, so nothing below
+#                                the dispatch needs to humour it
 set -e
 cd "${0%/*}/.."
 A='# 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl'
@@ -36,7 +36,7 @@ shell_end() { printf '# ENDSHELL\n#>\n\n'; }
     printf '\nhget "$@"\n'
     shell_end
     block powershell/hget.ps1
-    printf '\nfunction choosetrue\n{\nInvoke-Hget @args\n}\n& "choose$true" @args\n'
+    printf '\nInvoke-Hget @args\n'
 } > portable/hget.ps1
 
 # ---- hexec: the same hget function, called in-process --------------------
@@ -48,9 +48,12 @@ shell_end() { printf '# ENDSHELL\n#>\n\n'; }
     body bash/hexec
     shell_end
     block powershell/hget.ps1
-    printf '\nfunction choosetrue\n{\n'
+    # hexec.ps1 goes in whole, but wrapped: its param() block has to be the
+    # first statement of its scope, and at the top level of this file the
+    # dispatch is already above it.
+    printf '\nfunction Invoke-Hexec\n{\n'
     body powershell/hexec.ps1
-    printf '\n}\n& "choose$true" @args\n'
+    printf '\n}\nInvoke-Hexec @args\n'
 } > portable/hexec.ps1
 
 chmod +x portable/hget.ps1 portable/hexec.ps1
