@@ -10,6 +10,8 @@ PowerShell script at the same time.
 
 `portable/hget.ps1` fetches a URL on Linux, macOS, BSD **and** Windows. Not two
 files shipped together — one file, which both interpreters read as their own.
+`portable/hexec.ps1` does the same for verify-then-run, with `hget` built into
+it: no second file, no separate program.
 
 ```bash
 ./hget.ps1 https://example.com     # Unix: the shebang wins, the extension is ignored
@@ -40,10 +42,12 @@ dispatch, where no shell ever parses, because a shell exits at the dispatch and
 never reads on. Both halves are verified: binary body byte-exact, chunked
 decoding, redirects, 404 exit status, clean stdout on error, live HTTPS.
 
-`make portable` generates it from `bash/hget` and `powershell/hget.ps1`, so there
-is no third copy to drift. It is one file, not a set — copy it rather than
-`make install SET=portable`; `hexec`, `hwait` and `hmirror` run over it unchanged,
-since they only need a program called `hget`.
+`make portable` generates both from the `bash` and `powershell` sets, so there is
+no third copy to drift — and `make test` exercises them, so it cannot happen
+quietly. In `hexec` the shell half embeds `bash/hget` verbatim and evals it in a
+subshell, while the PowerShell half wraps `hget.ps1` in a function that writes to
+a file stream instead of spawning a process. These are files, not a set — copy
+them rather than `make install SET=portable`.
 
 **[portable/README.md](portable/README.md) is the full walkthrough** — why APE's
 positional-header trick does not transfer to two whole-file parsers, the table of
@@ -287,7 +291,8 @@ BASH_UNDER_TEST=/opt/homebrew/bin/bash ./test.sh bash
 ```
 
 The harness detects which sets the host can run and skips the rest. 36 tests per
-set. bash, zsh and powershell pass on macOS; ash passes on Alpine, where the
+set, plus 12 for each engine that can run the `portable` files — 132 on a host
+with bash, zsh, pwsh and the polyglots. bash, zsh and powershell pass on macOS; ash passes on Alpine, where the
 harness itself cannot run — Alpine has neither bash nor python3 — so that set is
 driven against fixtures served from another host.
 

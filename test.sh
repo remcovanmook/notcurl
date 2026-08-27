@@ -156,5 +156,38 @@ if have powershell && command -v pwsh >/dev/null 2>&1; then
         HMIRROR="pwsh -NoProfile -File $ROOT/powershell/hmirror.ps1"; suite
 fi
 
+# ---- portable: the polyglot files, under both engines ------------------
+portable_suite() {
+    local out rc saved
+    printf '\n%s\n' "$SET"
+    $PHGET "$B/install.sh" >/dev/null 2>&1;             is "$SET hget fetches"          "0" "$?"
+    $PHGET "$B/binary.bin" >"$DOC/p.bin" 2>/dev/null
+    is "$SET hget body is binary-clean" "$BIN" "$(sha "$DOC/p.bin" 2>/dev/null)"
+    $PHGET "http://127.0.0.1:$CHP/x" >"$DOC/pc.bin" 2>/dev/null
+    is "$SET hget decodes chunked"      "$BIN" "$(sha "$DOC/pc.bin" 2>/dev/null)"
+    out=$($PHGET "$B/sub" 2>&1);                        has "$SET hget follows redirects" "sub index" "$out"
+    $PHGET "$B/nope" >/dev/null 2>&1;                   is "$SET hget 404 exits 1"      "1" "$?"
+    out=$($PHEXEC "$B/install.sh" "$B/SHASUMS256.txt" $PSEP --prefix=/opt 2>&1)
+    has "$SET hexec verifies"        "sha256 verified" "$out"
+    has "$SET hexec passes args"     "args: --prefix=/opt" "$out"
+    out=$($PHEXEC "$B/install.sh" "$BADH" 2>&1); rc=$?
+    has   "$SET hexec mismatch says so"      "CHECKSUM MISMATCH" "$out"
+    hasnt "$SET hexec mismatch runs nothing" "installer ran" "$out"
+    is    "$SET hexec mismatch exits 1"      "1" "$rc"
+    out=$($PHEXEC -n "$B/install.sh" "$GOOD" 2>&1)
+    saved=$(printf '%s\n' "$out" | tail -1)
+    is "$SET hexec -n leaves file"   "$GOOD" "$(sha "$saved" 2>/dev/null)"; rm -f "$saved"
+    $PHEXEC "$B/fail.sh" >/dev/null 2>&1;               is "$SET hexec propagates status" "42" "$?"
+}
+
+if have portable && [ -f "$ROOT/portable/hget.ps1" ]; then
+    SET="portable (sh)" PSEP=-- PHGET="$SH $ROOT/portable/hget.ps1" \
+        PHEXEC="$SH $ROOT/portable/hexec.ps1"; portable_suite
+fi
+if have portable && command -v pwsh >/dev/null 2>&1 && [ -f "$ROOT/portable/hget.ps1" ]; then
+    SET="portable (pwsh)" PSEP= PHGET="pwsh -NoProfile -File $ROOT/portable/hget.ps1" \
+        PHEXEC="pwsh -NoProfile -File $ROOT/portable/hexec.ps1"; portable_suite
+fi
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -19,7 +19,7 @@ function Read-Line($s) {
     ([System.Text.Encoding]::ASCII.GetString($b.ToArray())).TrimEnd("`r")
 }
 
-$out = [Console]::OpenStandardOutput()
+$out = if ($HgetOut) { $HgetOut } else { [Console]::OpenStandardOutput() }
 $hop = 0
 
 while ($true) {
