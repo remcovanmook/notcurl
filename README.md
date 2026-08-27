@@ -4,7 +4,7 @@ Four HTTP tools in four shell scripts, each using only what its environment
 already ships. No curl, no wget. And portable files that are a bash script
 and a PowerShell script at the same time.
 
-Every tool is a single file, 60 to 110 lines, none over 4.3 kB, including
+Every tool is a single file, 22 to 107 lines, none over 5 kB, including
 argument parsing, redirects and error handling. Small enough to read before
 you run it.
 
@@ -22,7 +22,7 @@ Linux, macOS and BSD and as a PowerShell script on Windows, unmodified, and
 fetches, verifies and runs your installer on all of them: fetch fully, check
 against a SHA-256 you publish, then execute, with no other tool present.
 Containers and embedded systems get the same behaviour from the `ash` set,
-which needs nothing beyond busybox. One 14 kB file, four implementations,
+which needs nothing beyond busybox. One 15 kB file, four implementations,
 two languages, launches your installer on any modern platform, and your users
 can read every line before anything runs.
 
@@ -85,8 +85,8 @@ cannot run it.
 | `powershell/` | pwsh 7 | `TcpClient` | `SslStream` | pwsh 7.6 on macOS |
 
 The sets share no code. Each tool is a single file that runs on its own, so
-one can be copied to a host that has nothing else. No tool is over 3.7 kB and
-no complete set over 11 kB. Keeping one around alongside whatever else the
+one can be copied to a host that has nothing else. No tool is over 5 kB and no
+complete set over 14 kB. Keeping one around alongside whatever else the
 image has costs nothing worth measuring.
 
 ---
