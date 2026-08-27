@@ -107,9 +107,9 @@ error, and the naked form emits the function name onto stdout:
 Stray stdout is not cosmetic here: `hget` writes the response body to stdout, so
 one extra line corrupts every download.
 
-### 2. The shell body hides in comments
+### 2. The shell program sits in a PowerShell block comment
 
-PowerShell parses function bodies too, so it is not enough for `choose` to go
+PowerShell parses function bodies too, so it is not enough for a function to go
 uncalled — its contents must still *parse* as PowerShell. Real shell does not:
 
 ```
@@ -118,25 +118,28 @@ say()   { printf 'hget: %s\n' "$*" >&2; }
         An expression was expected after '('.
 ```
 
-So the shell implementation is not in the function. Every line of it carries a
-`#|` prefix, which makes the whole program a run of PowerShell comments, and
-`choose` reconstitutes it:
+So the shell program is wrapped in `<# ... #>`, where PowerShell sees one long
+comment. It stays **plain, unindented, unprefixed shell** — readable, and
+diffable against the file it came from.
+
+A bare `<#` is a syntax error to a shell, which looks fatal until you notice the
+shell never gets there: it has already exited at the dispatch line above. All the
+shell needs is to be *handed* the text, which `choose` does by line range:
 
 ```sh
 function choose
 {
-eval "$(sed -n 's/^#|//p' "$0")"
+eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
 exit
 }
 ```
 
-That body *is* valid PowerShell syntax — a command, a string with a
-subexpression, and `exit` — which is all that matters, because PowerShell never
-calls it. `sh` runs it and gets the real program back.
+That body is valid PowerShell syntax — a command, a string with a subexpression,
+and `exit` — which is all that matters, because PowerShell never calls it.
 
-The trailing `exit` is a guard. If the payload fails to eval, `choose` would
-return and `sh` would carry on into the PowerShell section and print a wall of
-syntax errors. `exit` makes the shell side terminate no matter what.
+The trailing `exit` is a guard. If the payload failed to eval, `choose` would
+return and the shell would carry on into the PowerShell section and print a wall
+of syntax errors. `exit` makes the shell side stop no matter what.
 
 ### 3. Ordering keeps the shell out of the PowerShell
 
@@ -186,91 +189,84 @@ remain the answer for zsh and busybox.
 
 ## hexec: hget without a second file
 
-The other four sets keep `hexec` and `hget` apart — `hexec` locates `hget` and
-runs it as a program. A single portable file cannot do that, so `hget` is
-embedded. Both halves manage it without duplicating a line of it.
-
-### The shell half embeds hget verbatim
-
-`bash/hget` rides along under a second marker, `#=`, and is handed back by a
-one-line function:
+The four sets keep `hexec` and `hget` apart — `hexec` finds `hget` and runs it as
+a program. One file cannot do that, so `hget` comes along. Neither half
+duplicates it or rewrites it: both sources carry a marked block and the build
+lifts it.
 
 ```sh
-hget() { ( eval "$(sed -n 's/^#=//p' "$0")" ) ; }
-hget=hget
+# >>> hget
+hget() ( ... )
+# <<< hget
 ```
 
-Two things make this cost nothing.
+`bash/hget` is that function plus a single call, `hget "$@"`. The body is a
+**subshell** — `( ... )` rather than `{ ... }` — which is what makes it safe to
+drop into another program. Its `say`, `die`, `parse` and `get` are local to it,
+its fd 5 is its own, and the `exit` it calls on failure ends the subshell rather
+than its caller, so `hexec` gets an ordinary exit status back and keeps its own
+`hexec:` prefix on messages.
 
-**The subshell contains it.** `bash/hget` defines its own `say`, `die`, `parse`
-and `get`, and calls `exit` on failure — all of which would collide with, or
-terminate, `hexec`. Inside `( ... )` those definitions are local and that `exit`
-ends only the subshell, so `$?` comes back as an ordinary status. `hexec` keeps
-its own `die` and its own `hexec:` prefix on messages. The positional parameters
-pass straight through, so the eval'd program sees `$1` as its url with nothing
-threaded through by hand.
-
-**No call site changes.** `bash/hexec` already invokes `"$hget"`. Defining a
-shell *function* named `hget` and setting `hget=hget` means every existing call
-resolves to the function — bash looks up functions before `PATH`. Only the two
-lines that used to locate the sibling script are replaced, and `bash/hget`
-itself is embedded completely unmodified.
-
-### The PowerShell half wraps it in a function
-
-`powershell/hget.ps1` becomes `function Invoke-Hget { ... }`, and `Fetch` writes
-into a file stream instead of starting a process:
+`powershell/hget.ps1` has the same shape — `function Invoke-Hget` plus a single
+call — with one parameter added so it can write somewhere other than the console:
 
 ```powershell
-function Fetch($url, $out) {
-    $fs = [System.IO.File]::Create($out)
-    try { $script:HgetOut = $fs; Invoke-Hget $url }
-    finally { $script:HgetOut = $null; $fs.Close() }
-    return 0
-}
+param([Parameter(Position = 0)][string]$Url,
+      [Parameter(Position = 1)][System.IO.Stream]$OutStream)
+...
+$out = if ($OutStream) { $OutStream } else { [Console]::OpenStandardOutput() }
 ```
 
-That needs one seam in the standalone `hget.ps1`, which otherwise hardcodes
-where the body goes:
+Both `Position` attributes are needed. Declaring an explicit `Position` on the
+first parameter switches the function to explicit positional binding, and a
+second parameter without one stops being positional at all — which fails at the
+call site, not at parse time.
+
+Neither `hexec` is rewritten by the build. Each simply prefers an `hget` that is
+already in scope:
+
+```sh
+if   [ -x "${0%/*}/hget" ];     then hget=${0%/*}/hget
+elif type hget >/dev/null 2>&1; then hget=hget   # a function, or one on PATH
+```
 
 ```powershell
-$out = if ($HgetOut) { $HgetOut } else { [Console]::OpenStandardOutput() }
+$inproc = $null -ne (Get-Command Invoke-Hget -ErrorAction SilentlyContinue)
 ```
 
-Unset, it is the console exactly as before, so the standalone file is unchanged
-in behaviour. Set by `Fetch`, the body lands in the temp file that gets hashed.
-
-Three PowerShell behaviours make the rest work, each verified rather than
-assumed:
-
-- **`Say`/`Die` defined inside `Invoke-Hget` stay local to it.** After the call
-  returns, `hexec`'s own versions are intact — the same containment the subshell
-  gives the shell half.
-- **`exit 1` inside the function propagates** out as the script's exit status,
-  so a failed download still exits 1.
-- **`finally` still runs on that `exit`**, so `hexec`'s temp file is removed
-  even when `hget` dies mid-fetch.
+Standalone, neither finds one and both behave exactly as before — sibling script,
+or a spawned process. Inside the polyglot the function is in scope, so the fetch
+happens in-process, with no second file and no second program.
 
 ### Verified
 
-Run against the repo's fixtures from a directory containing neither an `hget`
-file nor an `hget` on `PATH`, so nothing could have been resolved externally:
-checksum-url verification, filename matching inside a `SHASUMS256.txt`, a bare
-hash, argument pass-through, mismatch refusing to run and exiting 1, the
-unverified warning, `-n` leaving a verified file without running it, and exit
-status propagated from the script. **13 checks, both engines.** `make test`
-carries a subset permanently, so the generated files cannot drift unnoticed.
+Run from a directory containing neither an `hget` file nor an `hget` on `PATH`,
+so nothing could be resolved externally: checksum-url verification, filename
+matching in a `SHASUMS256.txt`, argument pass-through, mismatch refusing to run
+and exiting 1, and exit status propagated from the script. **12 checks, both
+engines.** `make test` carries a subset permanently.
 
 ---
 
 ## Sharp edges
 
-- Needs `sed`. A pure-shell extraction loop would not parse as PowerShell, and
-  the extraction has to live inside a function body that does.
-- Generated, not hand-written. Edit `bash/hget` or `powershell/hget.ps1` and run
-  `make portable`; edits made directly to this file are lost.
-- It is deliberately the least readable file in the repo. The other four sets
-  exist to be read; this one exists to prove a point.
+- Needs one text filter. A pure-shell extraction loop (`while read ... done <`)
+  would not parse as PowerShell, and the extraction has to live inside a function
+  body that does, so it must be an external command. The extraction is a **range**
+  between two literal marker lines rather than a per-line pattern, so it carries
+  no regex metacharacters and reads the same to sed, awk or grep:
+
+  ```sh
+  eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
+  eval "$(awk '/^# SHELL$/,/^# ENDSHELL$/' "$0")"
+  ```
+
+- The shell program must not contain `#>`, which would close the PowerShell block
+  comment early. Nothing in the sets does; worth knowing before editing one.
+- Generated, not hand-written. Edit the sets and run `make portable`; edits made
+  directly to these files are lost. Nothing is rewritten on the way through —
+  each source contributes either its marked `hget` block or the whole file — so
+  the output is the sources, in order, with about ten lines of glue between them.
 - `hwait` and `hmirror` are not built this way yet. They need a program called
   `hget` and do not care how it was made, so they run over `hget.ps1` as-is on
   Unix; a polyglot pair would follow the same shape as `hexec`.

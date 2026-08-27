@@ -1,68 +1,78 @@
 #!/usr/bin/env bash
 # 2026 Remco van Mook @rvmnl - Apache-2.0 - github.com/remcovanmook/notcurl
-USAGE='usage: hget <url>'
 
-set -u
-say()   { printf 'hget: %s\n' "$*" >&2; }
-die()   { say "$@"; exit 1; }
-usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
-req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
+# >>> hget
+# Fetch a url to stdout. The body is a subshell, not a brace block, so the
+# helpers, fd 5 and the exits all stay inside it: a caller gets an ordinary
+# exit status back and keeps its own say/die. portable/build lifts everything
+# between these two markers.
+hget() (
+    set -u
+    USAGE='usage: hget <url>'
+    say()   { printf 'hget: %s\n' "$*" >&2; }
+    die()   { say "$@"; exit 1; }
+    usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
+    req()   { printf 'GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: hget\r\nAccept: */*\r\n\r\n' "$path" "$hostport"; }
 
-parse() {
-    local url=$1 rest
-    rest=${url#*://} scheme=http
-    [ "$rest" != "$url" ] && scheme=${url%%://*}
-    hostport=${rest%%/*} path=/
-    [ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
-    host=${hostport%%:*} port=${hostport##*:}
-    [ "$port" = "$hostport" ] && port=
-    case $scheme in http) port=${port:-80} ;; https) port=${port:-443} ;; *) die "unsupported scheme: $scheme" ;; esac
-    [ -n "$host" ] || die "no host in url: $url"
-}
+    parse() {
+        local url=$1 rest
+        rest=${url#*://} scheme=http
+        [ "$rest" != "$url" ] && scheme=${url%%://*}
+        hostport=${rest%%/*} path=/
+        [ "${rest#*/}" != "$rest" ] && path=/${rest#*/}
+        host=${hostport%%:*} port=${hostport##*:}
+        [ "$port" = "$hostport" ] && port=
+        case $scheme in http) port=${port:-80} ;; https) port=${port:-443} ;; *) die "unsupported scheme: $scheme" ;; esac
+        [ -n "$host" ] || die "no host in url: $url"
+    }
 
-get() {
-    local proto h
-    parse "$1"
-    if [ "$scheme" = http ]; then
-        exec 5<>"/dev/tcp/$host/$port" || die "cannot connect to $host:$port"
-        req >&5
-    else
-        ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"
-        err=${err:-$(mktemp "${TMPDIR:-/tmp}/hget.XXXXXX")} || die "cannot create temp file"
-        exec 5< <(req | "$ssl" s_client -quiet -verify_return_error -servername "$host" -connect "$host:$port" 2>"$err")
-    fi
-    read -r proto code reason <&5 && [ -n "$code" ] || { grep -E 'verify error|:error:' "${err:-/dev/null}" >&2; die "no usable response from $host:$port"; }
-    reason=${reason%$'\r'} loc= chunked=
-    shopt -s nocasematch
-    while IFS= read -r h <&5 && h=${h%$'\r'} && [ -n "$h" ]; do
-        [[ $h == location:* ]] && read -r loc <<<"${h#*:}"
-        [[ $h == transfer-encoding:*chunked* ]] && chunked=1
+    get() {
+        local proto h
+        parse "$1"
+        if [ "$scheme" = http ]; then
+            exec 5<>"/dev/tcp/$host/$port" || die "cannot connect to $host:$port"
+            req >&5
+        else
+            ssl=$(command -v openssl); [ -x "${ssl:-}" ] || die "https needs openssl(1)"
+            err=${err:-$(mktemp "${TMPDIR:-/tmp}/hget.XXXXXX")} || die "cannot create temp file"
+            exec 5< <(req | "$ssl" s_client -quiet -verify_return_error -servername "$host" -connect "$host:$port" 2>"$err")
+        fi
+        read -r proto code reason <&5 && [ -n "$code" ] || { grep -E 'verify error|:error:' "${err:-/dev/null}" >&2; die "no usable response from $host:$port"; }
+        reason=${reason%$'\r'} loc= chunked=
+        shopt -s nocasematch
+        while IFS= read -r h <&5 && h=${h%$'\r'} && [ -n "$h" ]; do
+            [[ $h == location:* ]] && read -r loc <<<"${h#*:}"
+            [[ $h == transfer-encoding:*chunked* ]] && chunked=1
+        done
+        shopt -u nocasematch
+    }
+
+    [ $# -eq 1 ] || usage
+    url=$1 err=
+    trap '[ -n "$err" ] && rm -f "$err"' EXIT INT TERM
+
+    while :; do
+        get "$url"
+        [ -n "$loc" ] && [[ $code == 30[12378] ]] || break
+        [ $((hop = ${hop:-0} + 1)) -le 5 ] || die "more than 5 redirects"
+        case $loc in
+            *://*) url=$loc ;;
+            /*)    url=$scheme://$hostport$loc ;;
+            *)     url=$scheme://$hostport${path%/*}/$loc ;;
+        esac
+        exec 5<&-
     done
-    shopt -u nocasematch
-}
 
-[ $# -eq 1 ] || usage
-url=$1 err=
-trap '[ -n "$err" ] && rm -f "$err"' EXIT INT TERM
+    [[ $code == 2* ]] || die "$url returned $code $reason"
+    [ -n "$chunked" ] || { cat <&5; exit; }
+    while IFS= read -r n <&5; do
+        n=${n%$'\r'} n=${n%%;*}
+        case $n in ''|*[!0-9A-Fa-f]*) die "bad chunk header from $url" ;; esac
+        [ $((16#$n)) -gt 0 ] || break
+        dd bs=1 count=$((16#$n)) <&5 2>/dev/null
+        IFS= read -r n <&5
+    done
+)
+# <<< hget
 
-while :; do
-    get "$url"
-    [ -n "$loc" ] && [[ $code == 30[12378] ]] || break
-    [ $((hop = ${hop:-0} + 1)) -le 5 ] || die "more than 5 redirects"
-    case $loc in
-        *://*) url=$loc ;;
-        /*)    url=$scheme://$hostport$loc ;;
-        *)     url=$scheme://$hostport${path%/*}/$loc ;;
-    esac
-    exec 5<&-
-done
-
-[[ $code == 2* ]] || die "$url returned $code $reason"
-[ -n "$chunked" ] || { cat <&5; exit; }
-while IFS= read -r n <&5; do
-    n=${n%$'\r'} n=${n%%;*}
-    case $n in ''|*[!0-9A-Fa-f]*) die "bad chunk header from $url" ;; esac
-    [ $((16#$n)) -gt 0 ] || break
-    dd bs=1 count=$((16#$n)) <&5 2>/dev/null
-    IFS= read -r n <&5
-done
+hget "$@"

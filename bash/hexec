@@ -20,8 +20,10 @@ url=${1:-}; [ -n "$url" ] || usage; shift
 [ $# -gt 0 ] && [ "$1" != -- ] && { sum=$1; shift; }
 [ "${1:-}" = -- ] && shift
 
-hget=${0%/*}/hget
-[ -x "$hget" ] || hget=$(command -v hget) || die "cannot find hget(1)"
+if   [ -x "${0%/*}/hget" ];       then hget=${0%/*}/hget
+elif type hget >/dev/null 2>&1;   then hget=hget   # a function, or one on PATH
+else die "cannot find hget(1)"
+fi
 SHA=$(command -v sha256sum || command -v shasum || command -v openssl) || die "no sha256 tool"
 case ${SHA##*/} in shasum) SHA="$SHA -a 256" ;; openssl) SHA="$SHA dgst -sha256" ;; esac
 

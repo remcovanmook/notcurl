@@ -18,13 +18,19 @@ if (-not $Url) {
     [Console]::Error.WriteLine("usage: hexec [-n] <url> [<sha256-url>|<sha256>] [args...]`n  -n   fetch and verify only, then print the path")
     exit 2
 }
+$inproc = $null -ne (Get-Command Invoke-Hget -ErrorAction SilentlyContinue)
 $hget = Join-Path $PSScriptRoot 'hget.ps1'
-if (-not (Test-Path $hget)) { Die 'cannot find hget.ps1' }
+if (-not $inproc -and -not (Test-Path $hget)) { Die 'cannot find hget.ps1' }
 $pwshPath = (Get-Command pwsh).Source
 if ($null -eq $Rest) { $Rest = @() }
 while ($Rest.Count -gt 0 -and ($Rest[0] -eq '--' -or $Rest[0] -eq '')) { $Rest = @($Rest[1..($Rest.Count - 1)]) }
 
 function Fetch($url, $out) {
+    if ($inproc) {                     # hget was pulled in; no process needed
+        $fs = [System.IO.File]::Create($out)
+        try { Invoke-Hget -Url $url -OutStream $fs } finally { $fs.Close() }
+        return 0
+    }
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
     $psi.FileName = $pwshPath
     foreach ($a in @('-NoProfile', '-File', $hget, $url)) { $psi.ArgumentList.Add($a) }

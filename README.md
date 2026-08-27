@@ -36,17 +36,17 @@ One line, two unrelated readings, and no external command anywhere in it — whi
 is why it still works on Windows, where the `true` and `test` binaries that make
 lesser polyglots look correct do not exist.
 
-The shell implementation rides along as `#:` comments that PowerShell reads as
-comments and the shell `eval`s back. The PowerShell implementation sits below the
-dispatch, where no shell ever parses, because a shell exits at the dispatch and
-never reads on. Both halves are verified: binary body byte-exact, chunked
+The shell implementation sits verbatim inside a `<# ... #>` block, which
+PowerShell reads as one comment and the shell is handed by line range. The
+PowerShell implementation sits below it, where no shell ever parses, because a
+shell exits at the dispatch and never reads on. Both stay plain and unprefixed. Both halves are verified: binary body byte-exact, chunked
 decoding, redirects, 404 exit status, clean stdout on error, live HTTPS.
 
 `make portable` generates both from the `bash` and `powershell` sets, so there is
 no third copy to drift — and `make test` exercises them, so it cannot happen
-quietly. In `hexec` the shell half embeds `bash/hget` verbatim and evals it in a
-subshell, while the PowerShell half wraps `hget.ps1` in a function that writes to
-a file stream instead of spawning a process. These are files, not a set — copy
+quietly. In `hexec` both halves lift the `hget` function out of its own set — a subshell
+function in the shell, an `Invoke-Hget` taking an output stream in PowerShell —
+so the fetch happens in-process, with no second file and no second program. These are files, not a set — copy
 them rather than `make install SET=portable`.
 
 **[portable/README.md](portable/README.md) is the full walkthrough** — why APE's
