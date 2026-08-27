@@ -262,6 +262,28 @@ engines.** `make test` carries a subset permanently.
 
 ---
 
+## Shipping it as an installer
+
+The likely reason to want a portable `hexec` is to hand users one file that
+needs no arguments. Fill in the marked lines and it fetches, verifies and runs
+on its own:
+
+```sh
+grep -n 'hardcoded default URL' hexec.ps1
+```
+
+There are **two** of them, because the file holds two programs: `DEFAULT_URL`
+in the bash half and `$DefaultUrl` in the PowerShell half. Both need the same
+value. They are named differently on purpose — PowerShell variables are
+case-insensitive, so `$URL` and the `$Url` parameter are the same variable.
+
+On Unix `hexec.ps1 -- --prefix=/opt` passes arguments to the installer while
+still using the defaults. PowerShell cannot express that: with no url to fill
+the first positional slot, a leading `--prefix` is read as a parameter name and
+the binder rejects it. Zero-argument runs work on both.
+
+---
+
 ## Sharp edges
 
 - Needs one text filter. A pure-shell extraction loop (`while read ... done <`)
@@ -283,9 +305,7 @@ engines.** `make test` carries a subset permanently.
 - The bash program must not contain `#>`, which would close the PowerShell block
   comment early. Nothing in the sets does; worth knowing before editing one.
 - Generated, not hand-written. Edit the sets and run `make portable`; edits made
-  directly to these files are lost. Nothing is rewritten on the way through —
-  each source contributes either its marked `hget` block or the whole file — so
+  directly to these files are lost. Nothing is rewritten on the way through:
+  each source contributes either its marked `hget` block or the whole file. So
   the output is the sources, in order, with about ten lines of glue between them.
-- `hwait` and `hmirror` are not built this way yet. They need a program called
-  `hget` and do not care how it was made, so they run over `hget.ps1` as-is on
-  Unix; a polyglot pair would follow the same shape as `hexec`.
+

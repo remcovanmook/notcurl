@@ -14,8 +14,14 @@ $ErrorActionPreference = 'Stop'
 function Say($m) { [Console]::Error.WriteLine("hexec: $m") }
 function Die($m) { Say $m; exit 1 }
 
+# --- ship a zero-argument installer by filling in these two lines ----------
+$DefaultUrl = ''        # place hardcoded default URL here
+$DefaultSum = ''        # place its sha256 here, or a url to a checksum file
+# ---------------------------------------------------------------------------
+
+if (-not $Url) { $Url = $DefaultUrl; $Sum = $DefaultSum }
 if (-not $Url) {
-    [Console]::Error.WriteLine("usage: hexec [-n] <url> [<sha256-url>|<sha256>] [args...]`n  -n   fetch and verify only, then print the path")
+    [Console]::Error.WriteLine("usage: hexec [-n] <url> [<sha256-url>|<sha256>] [args...]`n  -n   fetch and verify only, then print the path`n`nWith `$DefaultUrl set in this file, both may be omitted.")
     exit 2
 }
 $inproc = $null -ne (Get-Command Invoke-Hget -ErrorAction SilentlyContinue)

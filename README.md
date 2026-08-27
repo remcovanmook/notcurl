@@ -1,10 +1,10 @@
 # hget / hexec / hwait / hmirror
 
-Four HTTP tools in four implementations, each using only what its environment
-already ships. No curl, no wget. One file that is a bash script and a
-PowerShell script at the same time.
+Four HTTP tools in four shell scripts, each using only what its environment
+already ships. No curl, no wget. And portable files that are a bash script
+and a PowerShell script at the same time.
 
-Every tool is a single file — 60 to 110 lines, none over 4.3 kB — including
+Every tool is a single file, 60 to 110 lines, none over 4.3 kB, including
 argument parsing, redirects and error handling. Small enough to read before
 you run it.
 
@@ -15,7 +15,7 @@ you run it.
 Your install page almost certainly carries two lines you would rather not
 defend: `curl -fsSL https://you.example/install.sh | bash` for Unix, and a
 separate PowerShell incantation for Windows. Neither verifies anything. Both
-execute whatever arrives.
+execute whatever arrives, complete or not.
 
 Replace them with one file. `portable/hexec.ps1` runs as a shell script on
 Linux, macOS and BSD and as a PowerShell script on Windows, unmodified, and
@@ -190,6 +190,20 @@ filename, so a project-wide `SHASUMS256.txt` works.
 
 Arguments after `--` are passed to the script. Its exit status becomes
 `hexec`'s. With no checksum, `hexec` warns on stderr and proceeds.
+
+Both arguments may be omitted if you fill in the two lines near the top of the
+file, which is how you ship a one-command installer:
+
+```sh
+# --- ship a zero-argument installer by filling in these two lines ----------
+DEFAULT_URL=https://ex.io/install.sh
+DEFAULT_SUM=https://ex.io/install.sh.sha256
+```
+
+Then `hexec` on its own fetches, verifies and runs, and `hexec -- --prefix=/opt`
+does the same while passing arguments through. An explicit url on the command
+line still wins. `hexec.ps1` has the same two lines as `$DefaultUrl` and
+`$DefaultSum` — the portable file carries both, one per language.
 
 ## hwait
 

@@ -95,21 +95,37 @@ USAGE='usage: hexec [-n] <url> [<sha256-url>|<sha256>] [-- args...]
   -n   fetch and verify only, then print the path
 
 A 64-hex second argument is the hash itself, anything else a url to fetch it from.
-Args after -- go to the script, whose exit status is passed through.'
+Args after -- go to the script, whose exit status is passed through.
+With DEFAULT_URL set in this file, the url and checksum may be omitted.'
 
 set -u
-dry=0 sum=
+# --- ship a zero-argument installer by filling in these two lines ----------
+DEFAULT_URL=            # place hardcoded default URL here
+DEFAULT_SUM=            # place its sha256 here, or a url to a checksum file
+# ---------------------------------------------------------------------------
+
+dry=0 sum= url=
 say()   { printf 'hexec: %s\n' "$*" >&2; }
 die()   { say "$@"; exit 1; }
 usage() { printf '%s\n' "$USAGE" >&2; exit 2; }
 
-while getopts ':n' o; do
-    case $o in n) dry=1 ;; *) usage ;; esac
+# Options by hand rather than getopts, which eats the "--" and would leave
+# "hexec -- --prefix=/opt" treating --prefix=/opt as the url.
+while [ $# -gt 0 ]; do
+    case $1 in
+        -n) dry=1; shift ;;
+        --) break ;;
+        -*) usage ;;
+        *)  break ;;
+    esac
 done
-shift $((OPTIND - 1))
-url=${1:-}; [ -n "$url" ] || usage; shift
-[ $# -gt 0 ] && [ "$1" != -- ] && { sum=$1; shift; }
+if [ $# -gt 0 ] && [ "$1" != -- ]; then
+    url=$1; shift
+    [ $# -gt 0 ] && [ "$1" != -- ] && { sum=$1; shift; }
+fi
 [ "${1:-}" = -- ] && shift
+[ -n "$url" ] || { url=$DEFAULT_URL; sum=$DEFAULT_SUM; }   # zero-argument run
+[ -n "$url" ] || usage
 
 if   [ -x "${0%/*}/hget" ];       then hget=${0%/*}/hget
 elif type hget >/dev/null 2>&1;   then hget=hget   # a function, or one on PATH
@@ -267,8 +283,14 @@ $ErrorActionPreference = 'Stop'
 function Say($m) { [Console]::Error.WriteLine("hexec: $m") }
 function Die($m) { Say $m; exit 1 }
 
+# --- ship a zero-argument installer by filling in these two lines ----------
+$DefaultUrl = ''        # place hardcoded default URL here
+$DefaultSum = ''        # place its sha256 here, or a url to a checksum file
+# ---------------------------------------------------------------------------
+
+if (-not $Url) { $Url = $DefaultUrl; $Sum = $DefaultSum }
 if (-not $Url) {
-    [Console]::Error.WriteLine("usage: hexec [-n] <url> [<sha256-url>|<sha256>] [args...]`n  -n   fetch and verify only, then print the path")
+    [Console]::Error.WriteLine("usage: hexec [-n] <url> [<sha256-url>|<sha256>] [args...]`n  -n   fetch and verify only, then print the path`n`nWith `$DefaultUrl set in this file, both may be omitted.")
     exit 2
 }
 $inproc = $null -ne (Get-Command Invoke-Hget -ErrorAction SilentlyContinue)

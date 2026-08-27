@@ -101,6 +101,22 @@ suite() {
     $HEXEC "$B/fail.sh" >/dev/null 2>&1;                 is "$SET hexec propagates status" "42" "$?"
     $HEXEC "$B/nope.sh" >/dev/null 2>&1;                 is "$SET hexec missing exits 1"   "1" "$?"
 
+    # a hardcoded DEFAULT_URL makes hexec runnable with no arguments at all
+    HXD=$DOC/hexdef.$SET; mkdir -p "$HXD"
+    for s in $(printf '%s\n' $HEXEC); do case $s in */hexec*) HXSRC=$s ;; esac; done
+    case $HXSRC in
+        *.ps1) cp "$ROOT/${SET}/hget.ps1" "$HXD/" 2>/dev/null; HXT=$HXD/hexec.ps1 ;;
+        *)     cp "$ROOT/${SET}/hget" "$HXD/" 2>/dev/null;     HXT=$HXD/hexec ;;
+    esac
+    sed -e "s|^DEFAULT_URL=|DEFAULT_URL=$B/install.sh|" -e "s|^DEFAULT_SUM=|DEFAULT_SUM=$GOOD|" \
+        -e "s|^\$DefaultUrl = ''|\$DefaultUrl = '$B/install.sh'|" \
+        -e "s|^\$DefaultSum = ''|\$DefaultSum = '$GOOD'|" "$HXSRC" > "$HXT"
+    chmod +x "$HXT" "$HXD"/hget* 2>/dev/null
+    out=$(printf '%s' "$HEXEC" | sed "s|$HXSRC|$HXT|")
+    out=$($out 2>&1)
+    has "$SET hexec zero-arg default url" "sha256 verified" "$out"
+    has "$SET hexec zero-arg runs it"     "installer ran" "$out"
+
     $HWAIT "$B/" 5 >/dev/null 2>&1;                      is "$SET hwait healthy exits 0"   "0" "$?"
     $HWAIT "http://127.0.0.1:1/" 2 >/dev/null 2>&1;      is "$SET hwait times out"         "1" "$?"
     $HWAIT "$B/nope" 2 >/dev/null 2>&1;                  is "$SET hwait 404 not ready"     "1" "$?"
