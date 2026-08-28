@@ -39,14 +39,14 @@ the same bytes as their own language.
 The whole dispatch is one token:
 
 ```sh
-${true:-choose "$@"}
+${undef:-choose "$@"}
 ```
 
-To a shell, `true` is an unset variable, so `${var:-default}` yields the
+To a shell, `undef` is an unset variable, so `${var:-default}` yields the
 default, and this calls the function `choose` with the script's arguments.
 
 To PowerShell, `${...}` delimits a variable name. The entire
-`true:-choose "$@"` is the name of one undefined variable, which evaluates to
+`undef:-choose "$@"` is the name of one undefined variable, which evaluates to
 `$null`, and a statement whose value is `$null` emits nothing: no output, no
 error, execution continues.
 

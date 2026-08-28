@@ -12,7 +12,7 @@ function choose
 eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
 exit
 }
-${true:-choose "$@"}
+${undef:-choose "$@"}
 
 <#
 # SHELL

@@ -79,15 +79,15 @@ Everything below is built on that one difference.
 ### 1. The dispatch line
 
 ```sh
-${true:-choose "$@"}
+${undef:-choose "$@"}
 ```
 
-**bash** — `true` is unset, so `${var:-default}` yields the default: the words
+**bash** — `undef` is unset, so `${var:-default}` yields the default: the words
 `choose "$@"`. The expansion is unquoted, so it word-splits into a command and
 its arguments, and bash calls the function `choose` with the script's arguments.
 
 **PowerShell** — `${...}` delimits a *variable name*, not an expression. The
-entire `true:-choose "$@"` is read as the name of one undefined variable, which
+entire `undef:-choose "$@"` is read as the name of one undefined variable, which
 evaluates to `$null`. A statement whose value is `$null` emits nothing. No
 output, no error, execution continues to the next line.
 
@@ -142,7 +142,7 @@ anything after a command that exits is never read. The layout is therefore:
 
 ```
 function choose { ... }    both parse this
-${true:-choose "$@"}       bash: runs it, exits    pwsh: $null, continues
+${undef:-choose "$@"}       bash: runs it, exits    pwsh: $null, continues
 <#                         bash: NEVER PARSED      pwsh: opens a comment
   ...the bash program...   bash: eval'd by choose  pwsh: inside the comment
 #>                         bash: NEVER PARSED      pwsh: closes it
