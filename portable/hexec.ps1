@@ -7,10 +7,9 @@
 #   ./hexec.ps1 ARGS   (Unix: the shebang wins, the extension is ignored)
 #   .\hexec.ps1 ARGS   (Windows PowerShell)
 
-function run_bash_half
-{
-eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
-exit
+function run_bash_half {
+    eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
+    exit
 }
 ${undef:-run_bash_half "$@"}
 

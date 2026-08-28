@@ -24,7 +24,7 @@ head_()   {
     printf '# Built by "make portable" from %s. Do not edit here.\n#\n' "$3"
     printf '#   ./%s ARGS   (Unix: the shebang wins, the extension is ignored)\n' "$1"
     printf '#   .\\%s ARGS   (Windows PowerShell)\n\n' "$1"
-    printf 'function run_bash_half\n{\neval "$(sed -n '"'"'/^# SHELL$/,/^# ENDSHELL$/p'"'"' "$0")"\nexit\n}\n'
+    printf 'function run_bash_half {\n    eval "$(sed -n '"'"'/^# SHELL$/,/^# ENDSHELL$/p'"'"' "$0")"\n    exit\n}\n'
     printf '${undef:-run_bash_half "$@"}\n\n<#\n# SHELL\n'
 }
 shell_end() { printf '# ENDSHELL\n#>\n\n'; }

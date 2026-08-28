@@ -87,10 +87,9 @@ exactly why it survives on Windows, where `true` and `test` do not exist.
 Six lines, and both languages read all six:
 
 ```sh
-function run_bash_half
-{
-eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
-exit
+function run_bash_half {
+    eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
+    exit
 }
 ${undef:-run_bash_half "$@"}
 ```
