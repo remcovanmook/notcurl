@@ -148,6 +148,13 @@ That is what the `function` → `eval` → `sed` sequence is for. It is not
 obfuscation; it is what keeps the payload verbatim — byte-identical to
 `bash/hget`, diffable against it, and readable in place.
 
+Two other regions would serve. A single-quoted string needs no hand-off at all,
+since `eval` runs it directly, at the cost of escaping every `'` in the payload.
+A `#` prefix on every line works too, and breaks tooling hardest: the payload in
+a block comment is byte-identical shell, so `diff` against `bash/hget`,
+`bash -n`, or a copy-paste into a terminal all still work on it, while a
+prefixed payload has to be stripped before any of them see shell at all.
+
 A bare `<#` is a bash syntax error, but bash never reaches it, having exited
 inside `run_bash_half` several lines above.
 
