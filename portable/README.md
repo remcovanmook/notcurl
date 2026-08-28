@@ -145,8 +145,8 @@ bash instead: `sed` cuts the marked line range out of `"$0"` — the script
 reading itself — and `eval` runs it.
 
 That is what the `function` → `eval` → `sed` sequence is for. It is not
-obfuscation; it is the only way to get a program out of a region whose whole
-purpose is to go unparsed.
+obfuscation; it is what keeps the payload verbatim — byte-identical to
+`bash/hget`, diffable against it, and readable in place.
 
 A bare `<#` is a bash syntax error, but bash never reaches it, having exited
 inside `run_bash_half` several lines above.
