@@ -58,19 +58,19 @@ executing a single line, so a syntax error at the bottom stops the top from
 running. There is no offset to hide in. Anything the other language must not see
 has to be inside a comment or a string *of the language that is reading it*.
 
-## The trick: `$true`
+## The trick: `${...}`
 
-`$true` is a PowerShell automatic variable holding boolean true, which
-interpolates into a string as `True`. To bash it is an unset variable that
-expands to nothing. So one token reads as two different names:
+Both languages accept `${...}`, and read what is inside it incompatibly.
 
-```
-"choose$true"   ->  bash: "choose"       pwsh: "chooseTrue"
-```
+- **bash** reads `${name:-word}` as a parameter expansion: if `name` is unset,
+  the expansion is `word`.
+- **PowerShell** reads `${...}` as a *variable name*, verbatim and entire.
+  Whatever sits between the braces is the name.
 
-No external command, no filesystem, nothing platform-specific — which is exactly
-why it survives on Windows where `true` and `test` do not exist. Everything below
-is built on that one difference.
+So a single token is a command in one language and a variable reference in the
+other. No external command, no filesystem, nothing platform-specific — which is
+exactly why it survives on Windows, where `true` and `test` do not exist.
+Everything below is built on that one difference.
 
 ---
 
@@ -90,6 +90,10 @@ its arguments, and bash calls the function `choose` with the script's arguments.
 entire `true:-choose "$@"` is read as the name of one undefined variable, which
 evaluates to `$null`. A statement whose value is `$null` emits nothing. No
 output, no error, execution continues to the next line.
+
+The identifier is arbitrary. It has only to be unset in bash, because
+PowerShell reads it as part of a name rather than as a variable —
+`${z:-choose "$@"}` dispatches identically.
 
 The arguments sit **inside** the braces, which is load-bearing in both
 directions: outside them PowerShell has a parse error, and any form that
