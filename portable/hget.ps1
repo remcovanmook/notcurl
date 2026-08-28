@@ -7,12 +7,12 @@
 #   ./hget.ps1 ARGS   (Unix: the shebang wins, the extension is ignored)
 #   .\hget.ps1 ARGS   (Windows PowerShell)
 
-function choose
+function run_bash_half
 {
 eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
 exit
 }
-${undef:-choose "$@"}
+${undef:-run_bash_half "$@"}
 
 <#
 # SHELL

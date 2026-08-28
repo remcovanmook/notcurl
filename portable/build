@@ -7,10 +7,10 @@
 #
 # The layout of a generated file:
 #
-#   function choose { ... }     parses as PowerShell, only ever runs under bash
-#   ${undef:-choose "$@"}        bash: calls choose.  pwsh: $null, emits nothing
+#   function run_bash_half { ... }     parses as PowerShell, only ever runs under bash
+#   ${undef:-run_bash_half "$@"}        bash: calls run_bash_half.  pwsh: $null, emits nothing
 #   <# ... #>                   bash has exited; PowerShell reads a comment
-#     the bash program            - plain, unprefixed, extracted by choose
+#     the bash program            - plain, unprefixed, extracted by run_bash_half
 #   ordinary PowerShell          bash never parses this far, so nothing below
 #                                the dispatch needs to humour it
 set -e
@@ -24,8 +24,8 @@ head_()   {
     printf '# Built by "make portable" from %s. Do not edit here.\n#\n' "$3"
     printf '#   ./%s ARGS   (Unix: the shebang wins, the extension is ignored)\n' "$1"
     printf '#   .\\%s ARGS   (Windows PowerShell)\n\n' "$1"
-    printf 'function choose\n{\neval "$(sed -n '"'"'/^# SHELL$/,/^# ENDSHELL$/p'"'"' "$0")"\nexit\n}\n'
-    printf '${undef:-choose "$@"}\n\n<#\n# SHELL\n'
+    printf 'function run_bash_half\n{\neval "$(sed -n '"'"'/^# SHELL$/,/^# ENDSHELL$/p'"'"' "$0")"\nexit\n}\n'
+    printf '${undef:-run_bash_half "$@"}\n\n<#\n# SHELL\n'
 }
 shell_end() { printf '# ENDSHELL\n#>\n\n'; }
 

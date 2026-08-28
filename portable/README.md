@@ -58,9 +58,16 @@ executing a single line, so a syntax error at the bottom stops the top from
 running. There is no offset to hide in. Anything the other language must not see
 has to be inside a comment or a string *of the language that is reading it*.
 
-## The trick: `${...}`
+## Two tricks
 
-Both languages accept `${...}`, and read what is inside it incompatibly.
+Everything below is built on two coincidences between the languages.
+
+**One: `function name { ... }` parses as a function definition in both.** The
+POSIX form does not — `name() { ... }` is a PowerShell parse error — so the
+`function` keyword is what makes a definition both parsers accept possible at
+all.
+
+**Two: `${...}` is read incompatibly.**
 
 - **bash** reads `${name:-word}` as a parameter expansion: if `name` is unset,
   the expansion is `word`.
@@ -70,69 +77,79 @@ Both languages accept `${...}`, and read what is inside it incompatibly.
 So a single token is a command in one language and a variable reference in the
 other. No external command, no filesystem, nothing platform-specific — which is
 exactly why it survives on Windows, where `true` and `test` do not exist.
-Everything below is built on that one difference.
 
 ---
 
 ## The four moving parts
 
-### 1. The dispatch line
+### 1. The dispatch
+
+Six lines, and both languages read all six:
 
 ```sh
-${undef:-choose "$@"}
+function run_bash_half
+{
+eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
+exit
+}
+${undef:-run_bash_half "$@"}
 ```
 
-**bash** — `undef` is unset, so `${var:-default}` yields the default: the words
-`choose "$@"`. The expansion is unquoted, so it word-splits into a command and
-its arguments, and bash calls the function `choose` with the script's arguments.
+**bash** defines the function, then finds `undef` unset, so `${var:-default}`
+yields the default: the words `run_bash_half "$@"`. The expansion is unquoted,
+so it word-splits into a command and its arguments, and bash calls the function
+with the script's arguments.
 
-**PowerShell** — `${...}` delimits a *variable name*, not an expression. The
-entire `undef:-choose "$@"` is read as the name of one undefined variable, which
-evaluates to `$null`. A statement whose value is `$null` emits nothing. No
-output, no error, execution continues to the next line.
+**PowerShell** defines the function too, and never calls it. `${...}` delimits a
+variable name, not an expression, so the entire `undef:-run_bash_half "$@"` is
+read as the name of one undefined variable, which evaluates to `$null`. A
+statement whose value is `$null` emits nothing: no output, no error, execution
+continues to the next line.
 
-The identifier is arbitrary. It has only to be unset in bash, because
-PowerShell reads it as part of a name rather than as a variable —
-`${z:-choose "$@"}` dispatches identically.
+That body is valid PowerShell syntax — a command, a string with a subexpression,
+and `exit` — which is all that matters, because PowerShell never calls it.
+
+The identifier is arbitrary. It has only to be unset in bash, because PowerShell
+reads it as part of a name rather than as a variable —
+`${z:-run_bash_half "$@"}` dispatches identically.
 
 The arguments sit **inside** the braces, which is load-bearing in both
 directions: outside them PowerShell has a parse error, and any form that
 evaluates to a string rather than `$null` prints it. `hget` writes the response
 body to stdout, so a single stray line corrupts every download.
 
-### 2. The bash program sits in a PowerShell block comment
+The trailing `exit` is a guard. If the eval failed, `run_bash_half` would return
+and bash would carry on into the PowerShell section and print a wall of syntax
+errors. `exit` makes the bash side stop no matter what.
 
-PowerShell parses function bodies too, so it is not enough for a function to go
-uncalled — its contents must still *parse* as PowerShell. Real shell does not:
+### 2. Why the bash is not simply inside that function
+
+Because PowerShell parses function bodies whether or not it calls them, and a
+parse error anywhere stops the whole file. Every line of that body has to be
+legal PowerShell, and real shell is not:
 
 ```
-say()   { printf 'hget: %s\n' "$*" >&2; }
-        ~
-        An expression was expected after '('.
+for h in a b; do printf '%s\n' "$h"; done
+    ~
+    Missing opening '(' after keyword 'for'.
 ```
 
-So the bash program is wrapped in `<# ... #>`, where PowerShell sees one long
-comment. It stays **plain, unindented, unprefixed bash** — readable, and
-diffable against the file it came from.
+So the bash program cannot live in the function, and it cannot sit at the top
+level either. It goes where PowerShell will not parse it: inside `<# ... #>`,
+which PowerShell reads as one long comment. There it stays **plain, unindented,
+unprefixed bash** — readable, and diffable against the file it came from.
 
-A bare `<#` is a bash syntax error, but bash never reaches it, having exited at
-the dispatch line above. All bash needs is to be *handed* the text, which
-`choose` does by line range:
+Which leaves bash unable to reach it by ordinary means, because that region is
+a comment to one language and unparsed by the other. So the text is *handed* to
+bash instead: `sed` cuts the marked line range out of `"$0"` — the script
+reading itself — and `eval` runs it.
 
-```sh
-function choose
-{
-eval "$(sed -n '/^# SHELL$/,/^# ENDSHELL$/p' "$0")"
-exit
-}
-```
+That is what the `function` → `eval` → `sed` sequence is for. It is not
+obfuscation; it is the only way to get a program out of a region whose whole
+purpose is to go unparsed.
 
-That body is valid PowerShell syntax — a command, a string with a subexpression,
-and `exit` — which is all that matters, because PowerShell never calls it.
-
-The trailing `exit` is a guard. If the payload failed to eval, `choose` would
-return and bash would carry on into the PowerShell section and print a wall of
-syntax errors. `exit` makes the bash side stop no matter what.
+A bare `<#` is a bash syntax error, but bash never reaches it, having exited
+inside `run_bash_half` several lines above.
 
 ### 3. Ordering keeps the PowerShell away from bash
 
@@ -141,10 +158,10 @@ sequence. bash parses one command at a time and executes as it goes, so
 anything after a command that exits is never read. The layout is therefore:
 
 ```
-function choose { ... }    both parse this
-${undef:-choose "$@"}       bash: runs it, exits    pwsh: $null, continues
+function run_bash_half { ... }    both parse this
+${undef:-run_bash_half "$@"}       bash: runs it, exits    pwsh: $null, continues
 <#                         bash: NEVER PARSED      pwsh: opens a comment
-  ...the bash program...   bash: eval'd by choose  pwsh: inside the comment
+  ...the bash program...   bash: eval'd by run_bash_half  pwsh: inside the comment
 #>                         bash: NEVER PARSED      pwsh: closes it
 ...ordinary PowerShell...  bash: NEVER PARSED      pwsh: just runs it
 ```

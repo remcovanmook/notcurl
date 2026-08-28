@@ -39,14 +39,14 @@ the same bytes as their own language.
 The whole dispatch is one token:
 
 ```sh
-${undef:-choose "$@"}
+${undef:-run_bash_half "$@"}
 ```
 
 To a shell, `undef` is an unset variable, so `${var:-default}` yields the
-default, and this calls the function `choose` with the script's arguments.
+default, and this calls the function `run_bash_half` with the script's arguments.
 
 To PowerShell, `${...}` delimits a variable name. The entire
-`undef:-choose "$@"` is the name of one undefined variable, which evaluates to
+`undef:-run_bash_half "$@"` is the name of one undefined variable, which evaluates to
 `$null`, and a statement whose value is `$null` emits nothing: no output, no
 error, execution continues.
 
